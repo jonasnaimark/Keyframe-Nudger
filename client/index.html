@@ -10,24 +10,14 @@
         <!-- Keyframe Nudger Section -->
         <div class="section-container">
             <section class="section">
-                <div class="section-header">
-                    <h2>Keyframe Nudger</h2>
-                </div>
                 <div class="section-content">
                 <!-- Top row with 5 equal-width elements -->
                 <div class="control-row keyframe-top-row">
                     <!-- 1. Read Keyframes (icon button, same handler) -->
                     <button id="readKeyframes" class="stagger-btn" title="Read Keyframes">
                         <svg width="18" height="18" viewBox="0 0 62 62" fill="none">
-                            <g clip-path="url(#clip0_read)">
-                                <rect x="2" y="3" width="41" height="40" rx="20" stroke="white" stroke-width="4"/>
-                                <line x1="38.4984" y1="38.912" x2="60.1738" y2="60.5873" stroke="white" stroke-width="4"/>
-                            </g>
-                            <defs>
-                                <clipPath id="clip0_read">
-                                    <rect width="62" height="62" fill="white"/>
-                                </clipPath>
-                            </defs>
+                            <rect x="3.98096" y="5" width="39" height="39" rx="19.5" stroke="white" stroke-width="4"/>
+                            <line x1="37.2521" y1="37.6463" x2="58.1927" y2="58.5869" stroke="white" stroke-width="4"/>
                         </svg>
                     </button>
                     <!-- 2. Snap keys to playhead -->
@@ -154,6 +144,18 @@
                 </div>
                 </div>
             </section>
+        </div>
+        <!-- Debug button row (inside container, at bottom) -->
+        <div style="display: flex; justify-content: flex-end; padding: 4px 8px;">
+            <button onclick="addDebugPanel()" style="
+                background: #333;
+                border: 1px solid #555;
+                color: #888;
+                padding: 2px 6px;
+                border-radius: 3px;
+                font-size: 9px;
+                cursor: pointer;
+            ">🐛 Debug</button>
         </div>
     </div>
 

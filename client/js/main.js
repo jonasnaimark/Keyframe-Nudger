@@ -9,6 +9,120 @@ const DEBUG = {
     warn: (msg, data) => console.warn(`⚠️ KeyframeNudger Warning: ${msg}`, data || '')
 };
 
+// Add debug panel to the extension UI
+window.addDebugPanel = () => {
+    if (document.getElementById('debug-panel')) return; // Already exists
+
+    const debugPanel = document.createElement('div');
+    debugPanel.id = 'debug-panel';
+    debugPanel.style.cssText = `
+        position: fixed;
+        top: 10px;
+        right: 10px;
+        width: 300px;
+        background: #1a1a1a;
+        border: 2px solid #3498db;
+        border-radius: 6px;
+        padding: 8px;
+        font-size: 10px;
+        color: #ccc;
+        z-index: 1000;
+        max-height: 200px;
+        overflow-y: auto;
+        user-select: text;
+        -webkit-user-select: text;
+        -moz-user-select: text;
+        font-family: monospace;
+    `;
+
+    debugPanel.innerHTML = `
+        <div style="font-weight: bold; margin-bottom: 5px; user-select: none; color: #3498db;">
+            🐛 Layer In/Out Point Debug
+        </div>
+        <div style="font-size: 8px; color: #888; margin-bottom: 5px; user-select: none;">
+            Showing: IN/OUT TRACK, IN/OUT UPDATE messages
+        </div>
+        <div id="debug-log" style="
+            user-select: text;
+            -webkit-user-select: text;
+            -moz-user-select: text;
+            font-family: monospace;
+            font-size: 9px;
+            line-height: 1.3;
+        "></div>
+        <div style="margin-top: 6px; user-select: none;">
+            <button onclick="document.getElementById('debug-log').innerHTML = ''" style="
+                background: #444;
+                border: 1px solid #666;
+                color: #ccc;
+                padding: 2px 6px;
+                border-radius: 3px;
+                font-size: 8px;
+                margin-right: 4px;
+                cursor: pointer;
+            ">Clear</button>
+            <button onclick="navigator.clipboard && navigator.clipboard.writeText(document.getElementById('debug-log').innerText)" style="
+                background: #444;
+                border: 1px solid #666;
+                color: #ccc;
+                padding: 2px 6px;
+                border-radius: 3px;
+                font-size: 8px;
+                margin-right: 4px;
+                cursor: pointer;
+            ">Copy</button>
+            <button onclick="document.getElementById('debug-panel').remove()" style="
+                background: #666;
+                border: 1px solid #888;
+                color: white;
+                padding: 2px 6px;
+                border-radius: 3px;
+                font-size: 8px;
+                cursor: pointer;
+            ">Close</button>
+        </div>
+    `;
+
+    document.body.appendChild(debugPanel);
+
+    // Redirect console.log to debug panel - FILTERED for layer in/out debugging
+    const originalLog = console.log;
+    console.log = (...args) => {
+        originalLog(...args);
+        const message = args.join(' ');
+
+        // Only show IN/OUT TRACK and IN/OUT UPDATE debug messages
+        const debugKeywords = [
+            'IN/OUT TRACK:',
+            'IN/OUT UPDATE:'
+        ];
+
+        const isInOutDebug = debugKeywords.some(keyword => message.includes(keyword));
+
+        if (isInOutDebug) {
+            const logDiv = document.getElementById('debug-log');
+            if (logDiv) {
+                // Color-code different message types
+                let color = '#ccc';
+                if (message.includes('IN/OUT TRACK:')) color = '#e74c3c';  // Red for tracking
+                if (message.includes('IN/OUT UPDATE:')) color = '#2ecc71'; // Green for updates
+                if (message.includes('Setting')) color = '#f39c12';  // Orange for actual updates
+
+                logDiv.innerHTML += `<div style="
+                    margin: 1px 0;
+                    font-size: 9px;
+                    padding: 1px 0;
+                    user-select: text;
+                    -webkit-user-select: text;
+                    word-wrap: break-word;
+                    color: ${color};
+                ">${message}</div>`;
+                logDiv.scrollTop = logDiv.scrollHeight;
+            }
+        }
+    };
+};
+
 // Helper functions to show/hide position rows
 function hidePositionRow(axis) {
     var row = document.getElementById(axis + 'DistanceRow');
@@ -195,6 +309,16 @@ document.addEventListener('DOMContentLoaded', function() {
         if (result && result.indexOf('|') !== -1) {
             var parts = result.split('|');
             var status = parts[0];
+
+            // Log all debug messages from JSX (parts 3+ are debug messages)
+            if (parts.length > 3) {
+                for (var i = 3; i < parts.length; i++) {
+                    if (parts[i]) {
+                        console.log(parts[i]);
+                    }
+                }
+            }
+
             if (status === 'success') {
                 var delayMs = parseInt(parts[1]);
                 var delayFrames = parseInt(parts[2]);
@@ -560,6 +684,56 @@ document.addEventListener('DOMContentLoaded', function() {
             var isShiftHeld = event.shiftKey;
             csInterface.evalScript('snapToPlayheadFromPanel(' + isShiftHeld + ')', function(result) {
                 console.log('Snap to playhead result:', result);
+            });
+        });
+    }
+
+    // Trim In Point
+    if (trimInBtn) {
+        trimInBtn.addEventListener('click', function() {
+            if (!csInterface) return;
+            csInterface.evalScript('handleTrimInPoint()', function(result) {
+                console.log('Trim in point result:', result);
+            });
+        });
+    }
+
+    // Trim Out Point
+    if (trimOutBtn) {
+        trimOutBtn.addEventListener('click', function() {
+            if (!csInterface) return;
+            csInterface.evalScript('handleTrimOutPoint()', function(result) {
+                console.log('Trim out point result:', result);
+            });
+        });
+    }
+
+    // Trim In-Out Point
+    if (trimInOutBtn) {
+        trimInOutBtn.addEventListener('click', function() {
+            if (!csInterface) return;
+            csInterface.evalScript('handleTrimInOutPoint()', function(result) {
+                console.log('Trim in-out point result:', result);
+            });
+        });
+    }
+
+    // Copy Keys
+    if (copyKeysBtn) {
+        copyKeysBtn.addEventListener('click', function() {
+            if (!csInterface) return;
+            csInterface.evalScript('copySelectedKeyframes()', function(result) {
+                console.log('Copy keys result:', result);
+            });
+        });
+    }
+
+    // Paste Keys
+    if (pasteKeysBtn) {
+        pasteKeysBtn.addEventListener('click', function() {
+            if (!csInterface) return;
+            csInterface.evalScript('pasteKeyframes()', function(result) {
+                console.log('Paste keys result:', result);
             });
         });
     }

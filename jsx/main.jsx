@@ -280,6 +280,267 @@ function restoreKeyframeState(prop, currentIndex, keyData) {
 }
 
 /**
+ * Track layer in/out points before nudging keyframes
+ * Returns data about which layers have keyframes aligned with their in/out points
+ */
+function trackLayerInOutPoints(layers) {
+    var layerData = [];
+
+    for (var i = 0; i < layers.length; i++) {
+        var layer = layers[i];
+        var selectedProps = layer.selectedProperties;
+
+        // Find earliest and latest selected keyframe times on this layer
+        var earliestTime = null;
+        var latestTime = null;
+
+        for (var j = 0; j < selectedProps.length; j++) {
+            var prop = selectedProps[j];
+            if (!prop || prop.propertyValueType === PropertyValueType.NO_VALUE) continue;
+            if (!prop.canVaryOverTime || prop.numKeys === 0) continue;
+
+            for (var k = 1; k <= prop.numKeys; k++) {
+                if (prop.keySelected(k)) {
+                    var keyTime = prop.keyTime(k);
+                    if (earliestTime === null || keyTime < earliestTime) {
+                        earliestTime = keyTime;
+                    }
+                    if (latestTime === null || keyTime > latestTime) {
+                        latestTime = keyTime;
+                    }
+                }
+            }
+        }
+
+        // Also check Time Remap
+        if (layer.timeRemapEnabled && layer.timeRemap && layer.timeRemap.numKeys > 0) {
+            for (var k = 1; k <= layer.timeRemap.numKeys; k++) {
+                if (layer.timeRemap.keySelected(k)) {
+                    var keyTime = layer.timeRemap.keyTime(k);
+                    if (earliestTime === null || keyTime < earliestTime) {
+                        earliestTime = keyTime;
+                    }
+                    if (latestTime === null || keyTime > latestTime) {
+                        latestTime = keyTime;
+                    }
+                }
+            }
+        }
+
+        // Check if earliest/latest align with layer in/out points (0.001s tolerance)
+        var trackInPoint = (earliestTime !== null && Math.abs(earliestTime - layer.inPoint) < 0.001);
+        var trackOutPoint = (latestTime !== null && Math.abs(latestTime - layer.outPoint) < 0.001);
+
+        // Find if ANY keyframe (not just selected) exists at the layer's out point
+        // This allows us to pin the out point when nudging backward
+        var lastKeyframeTime = null;
+        var pinOutPointToLastKey = false;
+
+        try {
+            // Scan all animatable properties for the last keyframe
+            function findLastKeyframeInGroup(propGroup) {
+                try {
+                    for (var p = 1; p <= propGroup.numProperties; p++) {
+                        try {
+                            var prop = propGroup.property(p);
+                            if (!prop) continue;
+
+                            if (prop.propertyType === PropertyType.PROPERTY) {
+                                if (prop.canVaryOverTime && prop.numKeys > 0) {
+                                    var lastKeyTime = prop.keyTime(prop.numKeys);
+                                    if (lastKeyframeTime === null || lastKeyTime > lastKeyframeTime) {
+                                        lastKeyframeTime = lastKeyTime;
+                                    }
+                                }
+                            } else if (prop.propertyType === PropertyType.INDEXED_GROUP ||
+                                       prop.propertyType === PropertyType.NAMED_GROUP) {
+                                findLastKeyframeInGroup(prop);
+                            }
+                        } catch (propError) {
+                            // Skip properties that cause errors
+                            continue;
+                        }
+                    }
+                } catch (groupError) {
+                    // Skip groups that cause errors
+                }
+            }
+
+            // Scan transform and other common properties
+            if (layer.transform) findLastKeyframeInGroup(layer.transform);
+            if (layer.effect && layer.effect.numProperties > 0) findLastKeyframeInGroup(layer.effect);
+            if (layer.mask && layer.mask.numProperties > 0) findLastKeyframeInGroup(layer.mask);
+            if (layer.text && layer.text.numProperties > 0) findLastKeyframeInGroup(layer.text);
+            if (layer.materialOption) findLastKeyframeInGroup(layer.materialOption);
+            if (layer.audio) findLastKeyframeInGroup(layer.audio);
+
+            // Check Time Remap
+            if (layer.timeRemapEnabled && layer.timeRemap && layer.timeRemap.numKeys > 0) {
+                var lastKeyTime = layer.timeRemap.keyTime(layer.timeRemap.numKeys);
+                if (lastKeyframeTime === null || lastKeyTime > lastKeyframeTime) {
+                    lastKeyframeTime = lastKeyTime;
+                }
+            }
+
+            // Check if the last keyframe on the layer is at the out point
+            pinOutPointToLastKey = (lastKeyframeTime !== null && Math.abs(lastKeyframeTime - layer.outPoint) < 0.001);
+        } catch (e) {
+            // If scanning fails, just don't pin the out point
+            DEBUG_JSX.log("IN/OUT TRACK: Error scanning for last keyframe: " + e.toString());
+            pinOutPointToLastKey = false;
+        }
+
+        DEBUG_JSX.log("IN/OUT TRACK: Layer '" + layer.name + "' - earliest: " + earliestTime + ", latest: " + latestTime);
+        DEBUG_JSX.log("IN/OUT TRACK: inPoint: " + layer.inPoint + ", outPoint: " + layer.outPoint);
+        DEBUG_JSX.log("IN/OUT TRACK: trackIn: " + trackInPoint + ", trackOut: " + trackOutPoint);
+        DEBUG_JSX.log("IN/OUT TRACK: lastKeyframe: " + lastKeyframeTime + ", pinOutPoint: " + pinOutPointToLastKey);
+
+        layerData.push({
+            layer: layer,
+            trackInPoint: trackInPoint,
+            trackOutPoint: trackOutPoint,
+            pinOutPointToLastKey: pinOutPointToLastKey,
+            originalInPoint: layer.inPoint,
+            originalOutPoint: layer.outPoint
+        });
+    }
+
+    return layerData;
+}
+
+/**
+ * Update layer in/out points after nudging keyframes
+ * Adjusts layer points if they were originally aligned with first/last selected keyframes
+ * Version 2: Accepts optional keyframe data array to avoid relying on selection state
+ */
+function updateLayerInOutPoints(layerData, keyframeDataArray) {
+    DEBUG_JSX.log("IN/OUT UPDATE: Called with " + layerData.length + " layers, " + (keyframeDataArray ? keyframeDataArray.length : 0) + " keyframes");
+
+    for (var i = 0; i < layerData.length; i++) {
+        var data = layerData[i];
+        var layer = data.layer;
+
+        DEBUG_JSX.log("IN/OUT UPDATE: Processing layer '" + layer.name + "' - trackIn: " + data.trackInPoint + ", trackOut: " + data.trackOutPoint);
+
+        var newEarliestTime = null;
+        var newLatestTime = null;
+
+        // If we have explicit keyframe data, use it (more reliable than selection state)
+        if (keyframeDataArray && keyframeDataArray.length > 0) {
+            // Find keyframe times for this specific layer from the data array
+            for (var j = 0; j < keyframeDataArray.length; j++) {
+                var kfData = keyframeDataArray[j];
+                // Check if this data belongs to our layer
+                if (kfData.layer === layer && kfData.newTime !== undefined) {
+                    var keyTime = kfData.newTime;
+                    DEBUG_JSX.log("IN/OUT UPDATE: Found keyframe at " + keyTime + "s for layer '" + layer.name + "'");
+                    if (newEarliestTime === null || keyTime < newEarliestTime) {
+                        newEarliestTime = keyTime;
+                    }
+                    if (newLatestTime === null || keyTime > newLatestTime) {
+                        newLatestTime = keyTime;
+                    }
+                }
+            }
+            DEBUG_JSX.log("IN/OUT UPDATE: New earliest: " + newEarliestTime + ", new latest: " + newLatestTime);
+        } else {
+            // Fallback: scan selected properties (original behavior)
+            var selectedProps = layer.selectedProperties;
+
+            for (var j = 0; j < selectedProps.length; j++) {
+                var prop = selectedProps[j];
+                if (!prop || prop.propertyValueType === PropertyValueType.NO_VALUE) continue;
+                if (!prop.canVaryOverTime || prop.numKeys === 0) continue;
+
+                for (var k = 1; k <= prop.numKeys; k++) {
+                    if (prop.keySelected(k)) {
+                        var keyTime = prop.keyTime(k);
+                        if (newEarliestTime === null || keyTime < newEarliestTime) {
+                            newEarliestTime = keyTime;
+                        }
+                        if (newLatestTime === null || keyTime > newLatestTime) {
+                            newLatestTime = keyTime;
+                        }
+                    }
+                }
+            }
+
+            // Also check Time Remap
+            if (layer.timeRemapEnabled && layer.timeRemap && layer.timeRemap.numKeys > 0) {
+                for (var k = 1; k <= layer.timeRemap.numKeys; k++) {
+                    if (layer.timeRemap.keySelected(k)) {
+                        var keyTime = layer.timeRemap.keyTime(k);
+                        if (newEarliestTime === null || keyTime < newEarliestTime) {
+                            newEarliestTime = keyTime;
+                        }
+                        if (newLatestTime === null || keyTime > newLatestTime) {
+                            newLatestTime = keyTime;
+                        }
+                    }
+                }
+            }
+        }
+
+        // Update layer points if they were tracked
+        if (data.trackInPoint && newEarliestTime !== null) {
+            DEBUG_JSX.log("IN/OUT UPDATE: Setting layer '" + layer.name + "' inPoint from " + layer.inPoint + " to " + newEarliestTime);
+            layer.inPoint = newEarliestTime;
+        }
+        if (data.trackOutPoint && newLatestTime !== null) {
+            DEBUG_JSX.log("IN/OUT UPDATE: Setting layer '" + layer.name + "' outPoint from " + layer.outPoint + " to " + newLatestTime);
+            layer.outPoint = newLatestTime;
+        }
+
+        // If we're moving the in point AND there was a keyframe at the out point, pin the out point to the last keyframe
+        if (data.trackInPoint && data.pinOutPointToLastKey && !data.trackOutPoint) {
+            // Find the current last keyframe on the layer
+            var currentLastKeyframeTime = null;
+
+            function findLastKeyframeInGroup(propGroup) {
+                for (var p = 1; p <= propGroup.numProperties; p++) {
+                    var prop = propGroup.property(p);
+                    if (prop.propertyType === PropertyType.PROPERTY) {
+                        if (prop.canVaryOverTime && prop.numKeys > 0) {
+                            var lastKeyTime = prop.keyTime(prop.numKeys);
+                            if (currentLastKeyframeTime === null || lastKeyTime > currentLastKeyframeTime) {
+                                currentLastKeyframeTime = lastKeyTime;
+                            }
+                        }
+                    } else if (prop.propertyType === PropertyType.INDEXED_GROUP ||
+                               prop.propertyType === PropertyType.NAMED_GROUP) {
+                        findLastKeyframeInGroup(prop);
+                    }
+                }
+            }
+
+            try {
+                if (layer.transform) findLastKeyframeInGroup(layer.transform);
+                if (layer.effect && layer.effect.numProperties > 0) findLastKeyframeInGroup(layer.effect);
+                if (layer.mask && layer.mask.numProperties > 0) findLastKeyframeInGroup(layer.mask);
+                if (layer.text && layer.text.numProperties > 0) findLastKeyframeInGroup(layer.text);
+                if (layer.materialOption) findLastKeyframeInGroup(layer.materialOption);
+                if (layer.audio) findLastKeyframeInGroup(layer.audio);
+            } catch (e) {
+                // Some properties may not exist on all layer types
+            }
+
+            // Check Time Remap
+            if (layer.timeRemapEnabled && layer.timeRemap && layer.timeRemap.numKeys > 0) {
+                var lastKeyTime = layer.timeRemap.keyTime(layer.timeRemap.numKeys);
+                if (currentLastKeyframeTime === null || lastKeyTime > currentLastKeyframeTime) {
+                    currentLastKeyframeTime = lastKeyTime;
+                }
+            }
+
+            if (currentLastKeyframeTime !== null) {
+                DEBUG_JSX.log("IN/OUT UPDATE: Pinning layer '" + layer.name + "' outPoint to last keyframe at " + currentLastKeyframeTime);
+                layer.outPoint = currentLastKeyframeTime;
+            }
+        }
+    }
+}
+
+/**
  * Scales KeyframeEase speed to maintain visual curve shape when duration changes
  * @param {Array} easeArray - Array of KeyframeEase objects
  * @param {number} oldDuration - Original duration between keyframes (seconds)
@@ -2116,11 +2377,16 @@ function stretchKeyframesGrokApproach(frameAdjustment) {
         }
         
         var frameDuration = 1 / comp.frameRate;
-        
+
         var selectedLayers = comp.selectedLayers;
         var totalDuration = 0;
         var processedAny = false;
-        
+
+        // Track layer in/out points BEFORE stretching
+        // If first selected keyframe is at layer in point, we'll move in point when stretching
+        // If last selected keyframe is at layer out point, we'll move out point when stretching
+        var layerInOutData = trackLayerInOutPoints(selectedLayers);
+
         for (var i = 0; i < selectedLayers.length; i++) {
             var layer = selectedLayers[i];
             var selectedProps = layer.selectedProperties;
@@ -2361,9 +2627,12 @@ function stretchKeyframesGrokApproach(frameAdjustment) {
                 }
             }
         }
-        
+
+        // Update layer in/out points to match stretched keyframes
+        updateLayerInOutPoints(layerInOutData);
+
         app.endUndoGroup();
-        
+
         if (!processedAny) {
             return "error|Select > 1 Key";
         }
@@ -2401,10 +2670,15 @@ function stretchKeyframesGrokApproachWithFrames(direction, frames) {
         DEBUG_JSX.log("Converting " + frames + " frames to " + framesToMs + "ms at " + frameRate + "fps");
         
         var selectedLayers = comp.selectedLayers;
+
+        // Track layer in/out points before manipulation
+        var layerInOutData = trackLayerInOutPoints(selectedLayers);
+
         var totalDuration = 0;
         var processedAny = false;
         var allProcessedSelections = []; // Collect ALL selections for final restoration
         var allProcessedKeyframeTimes = []; // Track all keyframe times for total span calculation
+        var allKeyframeDataForInOut = []; // For layer in/out point tracking
         
         DEBUG_JSX.log("🎬 Found " + selectedLayers.length + " selected layers");
         
@@ -2716,9 +2990,14 @@ function stretchKeyframesGrokApproachWithFrames(direction, frames) {
                         // Apply to new duration, maintaining start position
                         var newTime = firstTime + relativePosition * newDuration;
                         var newIdx = prop.addKey(newTime);
-                        
+
                         // Track keyframe time for total span calculation
                         allProcessedKeyframeTimes.push(newTime);
+                        // Also collect with layer reference for in/out tracking
+                        allKeyframeDataForInOut.push({
+                            layer: cached.layer,
+                            newTime: newTime
+                        });
                         
                         try {
                             prop.setValueAtKey(newIdx, data.value);
@@ -3160,6 +3439,9 @@ function stretchKeyframesGrokApproachWithFrames(direction, frames) {
         
         DEBUG_JSX.log("🎬 Frame-based duration stretch completed: " + finalDurationMs + "ms / " + finalDurationFrames + "f");
 
+        // Update layer in/out points
+        updateLayerInOutPoints(layerInOutData, allKeyframeDataForInOut);
+
         // End undo group AFTER all operations complete (including final restoration pass)
         app.endUndoGroup();
 
@@ -3331,7 +3613,10 @@ function stretchKeyframesForCrossProperty(direction, frames) {
             app.endUndoGroup();
             return "error|No layers selected";
         }
-        
+
+        // Track layer in/out points before manipulation
+        var layerInOutData = trackLayerInOutPoints(selectedLayers);
+
         // STEP 1: CACHE ALL SELECTIONS BEFORE ANY MANIPULATION
         DEBUG_JSX.log("🎬 STEP 1: Caching all selected keyframes before manipulation");
         var cachedSelections = [];
@@ -3383,6 +3668,7 @@ function stretchKeyframesForCrossProperty(direction, frames) {
         var allProcessedSelections = []; // Collect ALL selections for final restoration
         var allProcessedKeyframeTimes = []; // Collect ALL new keyframe times for total span calculation
         var propertyDurations = []; // Collect each property's duration to check if they're all the same
+        var allKeyframeDataForInOut = []; // For layer in/out point tracking
 
         for (var i = 0; i < cachedSelections.length; i++) {
             var cached = cachedSelections[i];
@@ -3407,6 +3693,11 @@ function stretchKeyframesForCrossProperty(direction, frames) {
                 // COLLECT all new keyframe times for total span calculation (like readKeyframesSmart does)
                 for (var t = 0; t < result.newKeyframeTimes.length; t++) {
                     allProcessedKeyframeTimes.push(result.newKeyframeTimes[t]);
+                    // Also collect with layer reference for in/out tracking
+                    allKeyframeDataForInOut.push({
+                        layer: cached.layer,
+                        newTime: result.newKeyframeTimes[t]
+                    });
                 }
 
                 // COLLECT each property's duration
@@ -3556,6 +3847,9 @@ function stretchKeyframesForCrossProperty(direction, frames) {
         }
 
         DEBUG_JSX.log("🎬 Cross-property duration stretch completed: " + processedProperties + " properties, " + totalDurationMs + "ms / " + totalDurationFrames + "f");
+
+        // Update layer in/out points
+        updateLayerInOutPoints(layerInOutData, allKeyframeDataForInOut);
 
         // Return success with cross-property flag
         return "success|" + totalDurationMs + "|" + totalDurationFrames + "|1|CROSSDURATION";
@@ -4640,7 +4934,14 @@ function nudgeDelay(direction) {
             DEBUG_JSX.log("GLOBAL");
             return nudgeFromPlayhead(direction, 3); // Use 3 frames as default
         }
-        
+
+        // Track layer in/out points BEFORE nudging
+        // If first selected keyframe is at layer in point, we'll move in point when nudging
+        // If last selected keyframe is at layer out point, we'll move out point when nudging
+        DEBUG_JSX.log("IN/OUT TRACK: [nudgeDelay] About to call trackLayerInOutPoints with " + selectedLayers.length + " layers");
+        var layerInOutData = trackLayerInOutPoints(selectedLayers);
+        DEBUG_JSX.log("IN/OUT TRACK: [nudgeDelay] Got " + layerInOutData.length + " layer tracking records");
+
         var propertyTimes = [];
         
         // Collect all selected keyframes from all properties (using same approach as duration stretching)
@@ -4769,6 +5070,7 @@ function nudgeDelay(direction) {
             propertyDelays.push({
                 property: propName,
                 propObject: propData.property,
+                layer: propData.layer, // Add layer reference for in/out point tracking
                 keyframes: keyframes,
                 selectedKeys: propData.selectedKeys,
                 currentDelay: firstTime,
@@ -4902,9 +5204,11 @@ function nudgeDelay(direction) {
                     
                     // Move all keyframes using the same approach as baseline mode
                     var timelinePropertyData = [];
+                    var allKeyframeData = []; // For layer in/out point tracking
                     for (var i = 0; i < propertyDelays.length; i++) {
                         var propData = propertyDelays[i];
                         var prop = propData.propObject;
+                        var propLayer = propData.layer; // Get layer reference
                         var keyframesToMove = [];
 
                         // PROTECTION: Capture the next keyframe to prevent AE from modifying it
@@ -4964,8 +5268,14 @@ function nudgeDelay(direction) {
                             }
                             
                             keyframesToMove.push(keyData);
+
+                            // Collect for layer in/out point tracking
+                            allKeyframeData.push({
+                                layer: propLayer,
+                                newTime: keyData.newTime
+                            });
                         }
-                        
+
                         // Remove old keyframes (in reverse order to maintain indices)
                         keyframesToMove.sort(function(a, b) { return b.oldIndex - a.oldIndex; });
                         for (var k = 0; k < keyframesToMove.length; k++) {
@@ -5204,7 +5514,10 @@ function nudgeDelay(direction) {
                             newSelIndices: propInfo.newSelIndices
                         });
                     }
-                    
+
+                    // Update layer in/out points to match nudged keyframes
+                    updateLayerInOutPoints(layerInOutData, allKeyframeData);
+
                     app.endUndoGroup();
                     
                     // COMPOSITION MARKER SYNCING AFTER UNDO GROUP - this prevents selection clearing
@@ -5393,9 +5706,11 @@ function nudgeDelay(direction) {
                     
                     // Move all keyframes using recreate approach
                     var timelinePropertyData = [];
+                    var allKeyframeData2 = []; // For layer in/out point tracking
                     for (var propName in propertyMap) {
                         var propData = propertyMap[propName];
                         var prop = propData.property;
+                        var propLayer2 = propData.layer; // Get layer reference
                         var keyframesToMove = [];
 
                         // PROTECTION: Capture the next keyframe to prevent AE from modifying it
@@ -5453,10 +5768,16 @@ function nudgeDelay(direction) {
                                 keyData.inTangent = prop.keyInSpatialTangent(keyIndex);
                                 keyData.outTangent = prop.keyOutSpatialTangent(keyIndex);
                             }
-                            
+
                             keyframesToMove.push(keyData);
+
+                            // Collect for layer in/out point tracking
+                            allKeyframeData2.push({
+                                layer: propLayer2,
+                                newTime: keyData.newTime
+                            });
                         }
-                        
+
                         // Remove old keyframes (reverse order)
                         keyframesToMove.sort(function(a, b) { return b.oldIndex - a.oldIndex; });
                         for (var k = 0; k < keyframesToMove.length; k++) {
@@ -5591,10 +5912,13 @@ function nudgeDelay(direction) {
                         DEBUG_JSX.log("Marker sync error in regular timeline: " + markerSyncError.toString());
                         debugInfo.push("Marker sync error: " + markerSyncError.toString());
                     }
-                    
+
                     var newTimelinePositionMs = Math.round(newTimelineTime * 1000);
                     var newTimelinePositionFrames = Math.round(newTimelineTime * frameRate);
-                    
+
+                    // Update layer in/out points to match nudged keyframes
+                    updateLayerInOutPoints(layerInOutData, allKeyframeData2);
+
                     app.endUndoGroup();
                     // Include debug messages in result for debug panel
                     var debugMessages = DEBUG_JSX.getMessages();
@@ -5641,8 +5965,10 @@ function nudgeDelay(direction) {
         // Apply time offsets to move properties to their target delays
         try {
             var movedCount = 0;
+            var allKeyframeData3 = []; // For layer in/out point tracking in baseline mode
             for (var i = 0; i < propertyDelays.length; i++) {
                 var propData = propertyDelays[i];
+                var baselineLayer = propData.layer; // Get layer reference for in/out tracking
                 var currentTime = propData.currentDelay;
                 
                 var timeOffset;
@@ -5719,8 +6045,14 @@ function nudgeDelay(direction) {
                             keyData.inTangent = prop.keyInSpatialTangent(keyIndex);
                             keyData.outTangent = prop.keyOutSpatialTangent(keyIndex);
                         }
-                        
+
                         keyframesToMove.push(keyData);
+
+                        // Collect for layer in/out point tracking
+                        allKeyframeData3.push({
+                            layer: baselineLayer,
+                            newTime: keyData.newTime
+                        });
                     } catch(collectError) {
                         throw new Error("Failed to collect keyframe data for index " + keyIndex + ": " + collectError.toString());
                     }
@@ -5996,7 +6328,10 @@ function nudgeDelay(direction) {
             // Don't fail the entire operation if selection fails
             debugInfo.push("Selection error: " + selectionError.toString());
         }
-        
+
+        // Update layer in/out points to match nudged keyframes
+        updateLayerInOutPoints(layerInOutData, allKeyframeData3);
+
         app.endUndoGroup();
         
         // Return the result in the same format as readKeyframesSmart
@@ -7702,7 +8037,14 @@ function nudgeDelayTimelineMode(direction, frames) {
             DEBUG_JSX.log("GLOBAL DELAY: No selection, nudging from playhead with " + frames + " frames");
             return nudgeFromPlayhead(direction, frames, false);
         }
-        
+
+        // Track layer in/out points BEFORE nudging
+        // If first selected keyframe is at layer in point, we'll move in point when nudging
+        // If last selected keyframe is at layer out point, we'll move out point when nudging
+        DEBUG_JSX.log("IN/OUT TRACK: About to call trackLayerInOutPoints with " + selectedLayers.length + " layers");
+        var layerInOutData = trackLayerInOutPoints(selectedLayers);
+        DEBUG_JSX.log("IN/OUT TRACK: Got " + layerInOutData.length + " layer tracking records");
+
         // STEP 1: CACHE ALL SELECTIONS BEFORE ANY MANIPULATION
         var cachedSelections = [];
         var hasSelectedKeyframes = false;
@@ -7877,7 +8219,8 @@ function nudgeDelayTimelineMode(direction, frames) {
         
         var movedCount = 0;
         var processedSelections = [];
-        
+        var allKeyframeDataTimeline = []; // For layer in/out point tracking
+
         // MOVE MARKERS FIRST (before keyframe operations to avoid selection interference)
         DEBUG_JSX.log("STEP 2A: SMART marker split/merge BEFORE keyframe operations");
 
@@ -8049,8 +8392,14 @@ function nudgeDelayTimelineMode(direction, frames) {
                             // Spatial properties might not be available
                         }
                     }
-                    
+
                     keyframesToMove.push(keyData);
+
+                    // Collect for layer in/out point tracking
+                    allKeyframeDataTimeline.push({
+                        layer: cached.layer,
+                        newTime: newTime
+                    });
                 } else {
                     DEBUG_JSX.log("Skipped keyframe at " + oldTime + "s (would be negative)");
                 }
@@ -8432,9 +8781,14 @@ function nudgeDelayTimelineMode(direction, frames) {
 
             DEBUG_JSX.log("Completed processing property " + (i+1) + "/" + cachedSelections.length);
         }
-        
+
         // Markers were already moved before keyframe operations to avoid selection interference
-        
+
+        // Update layer in/out points to match nudged keyframes
+        DEBUG_JSX.log("IN/OUT UPDATE: About to call updateLayerInOutPoints with " + allKeyframeDataTimeline.length + " keyframes");
+        updateLayerInOutPoints(layerInOutData, allKeyframeDataTimeline);
+        DEBUG_JSX.log("IN/OUT UPDATE: Finished updating layer in/out points");
+
         app.endUndoGroup();
         
         // Small delay to let After Effects process the undo group before restoring selections
@@ -10789,18 +11143,30 @@ function applyStagger(direction, staggerFrames, isTopToBottom) {
         // Convert stagger frames to milliseconds
         var staggerMs = roundMs(staggerFrames / frameRate);
         DEBUG_JSX.log("Stagger: " + staggerFrames + " frames = " + staggerMs + "ms at " + frameRate + "fps");
-        
+
+        var selectedLayers = comp.selectedLayers;
+
+        // Track layer in/out points BEFORE staggering
+        // If first selected keyframe is at layer in point, we'll move in point when staggering
+        // If last selected keyframe is at layer out point, we'll move out point when staggering
+        var layerInOutData = trackLayerInOutPoints(selectedLayers);
+
+        // Shared array to collect keyframe data during staggering
+        var staggerKeyframeData = [];
+
         // Check for selected keyframes first (keyframes take precedence)
-        var keyframeResult = applyStaggerToKeyframes(direction, staggerMs, frameRate, staggerFrames, isTopToBottom);
+        var keyframeResult = applyStaggerToKeyframes(direction, staggerMs, frameRate, staggerFrames, isTopToBottom, staggerKeyframeData);
         if (keyframeResult.indexOf("error|No selected keyframes") !== 0) {
+            // Update layer in/out points to match staggered keyframes
+            updateLayerInOutPoints(layerInOutData, staggerKeyframeData);
             app.endUndoGroup();
             var debugMessages = DEBUG_JSX.getMessages();
             return keyframeResult + "|" + debugMessages.join("|");
         }
-        
-        // If no keyframes selected, try layers
+
+        // If no keyframes selected, try layers (layer staggering doesn't need in/out tracking)
         var layerResult = applyStaggerToLayers(direction, staggerMs, frameRate, staggerFrames, isTopToBottom);
-        
+
         app.endUndoGroup();
         var debugMessages = DEBUG_JSX.getMessages();
         return layerResult + "|" + debugMessages.join("|");
@@ -10977,7 +11343,7 @@ function getPropertyIndexInGroup(propertyName, allKeyframes) {
 
 
 // Apply stagger to selected keyframes (grouped by layer)
-function applyStaggerToKeyframes(direction, staggerMs, frameRate, staggerFrames, isTopToBottom) {
+function applyStaggerToKeyframes(direction, staggerMs, frameRate, staggerFrames, isTopToBottom, keyframeDataArray) {
     try {
         DEBUG_JSX.log("🎬 applyStaggerToKeyframes called with direction: " + direction + ", stagger: " + staggerFrames + " frames");
         
@@ -11131,7 +11497,7 @@ function applyStaggerToKeyframes(direction, staggerMs, frameRate, staggerFrames,
         
         if (layerGroups.length === 1) {
             DEBUG_JSX.log("Single layer detected - attempting property-level stagger");
-            return applySameLayerStagger(layerGroups[0], direction, staggerMs, frameRate, staggerFrames, isTopToBottom);
+            return applySameLayerStagger(layerGroups[0], direction, staggerMs, frameRate, staggerFrames, isTopToBottom, keyframeDataArray);
         }
         
         // Skip cross-property staggering - only stagger between different layers
@@ -11434,6 +11800,14 @@ function applyStaggerToKeyframes(direction, staggerMs, frameRate, staggerFrames,
                     for (var k = 0; k < keyframeData.length; k++) {
                         var data = keyframeData[k];
                         var newIdx = prop.addKey(data.newTime);
+
+                        // Collect keyframe data for layer in/out tracking
+                        if (keyframeDataArray) {
+                            keyframeDataArray.push({
+                                layer: layer,
+                                newTime: data.newTime
+                            });
+                        }
                         
                         // Restore value and interpolation
                         prop.setValueAtKey(newIdx, data.value);
@@ -11528,7 +11902,7 @@ function applyStaggerToKeyframes(direction, staggerMs, frameRate, staggerFrames,
 }
 
 // Apply stagger to selected properties within a single layer
-function applySameLayerStagger(layerGroup, direction, staggerMs, frameRate, staggerFrames, isTopToBottom) {
+function applySameLayerStagger(layerGroup, direction, staggerMs, frameRate, staggerFrames, isTopToBottom, keyframeDataArray) {
     try {
         var layer = layerGroup.layer;
         var secondsPerStep = staggerMs / 1000;
@@ -11725,6 +12099,14 @@ function applySameLayerStagger(layerGroup, direction, staggerMs, frameRate, stag
                 for (var addIdx = 0; addIdx < timeRemapMoves.length; addIdx++) {
                     var move = timeRemapMoves[addIdx];
                     prop.setValueAtTime(move.newTime, move.value);
+
+                    // Collect keyframe data for layer in/out tracking
+                    if (keyframeDataArray) {
+                        keyframeDataArray.push({
+                            layer: layer,
+                            newTime: move.newTime
+                        });
+                    }
                 }
                 
                 var oldKeyIndicesToRemove = [];
@@ -11823,7 +12205,15 @@ function applySameLayerStagger(layerGroup, direction, staggerMs, frameRate, stag
                 for (var addKeyIdx = 0; addKeyIdx < keyframeData.length; addKeyIdx++) {
                     var data = keyframeData[addKeyIdx];
                     var newIdx = prop.addKey(data.newTime);
-                    
+
+                    // Collect keyframe data for layer in/out tracking
+                    if (keyframeDataArray) {
+                        keyframeDataArray.push({
+                            layer: layer,
+                            newTime: data.newTime
+                        });
+                    }
+
                     try {
                         prop.setValueAtKey(newIdx, data.value);
                         
@@ -18951,5 +19341,1207 @@ function mirrorKeysFromPanel(preserveDelays) {
     } catch(e) {
         app.endUndoGroup();
         return "error|Mirror keys failed: " + e.toString();
+    }
+}
+
+// ============================================================================
+// TRIM IN/OUT POINT FUNCTIONS
+// ============================================================================
+
+/**
+ * Handle trim in point operation - called from panel
+ * If keyframes selected: Move selected keyframes so first keyframe lands on layer's in point
+ * If no keyframes selected: Trim each layer's in point to its first keyframe
+ */
+function handleTrimInPoint() {
+    try {
+        DEBUG_JSX.clear();
+        DEBUG_JSX.log("handleTrimInPoint called");
+        app.beginUndoGroup("Trim In Point");
+        
+        var comp = app.project.activeItem;
+        if (!comp || !(comp instanceof CompItem)) {
+            app.endUndoGroup();
+            return "error|No active composition";
+        }
+        
+        var selectedLayers = [];
+        for (var i = 0; i < comp.selectedLayers.length; i++) {
+            selectedLayers.push(comp.selectedLayers[i]);
+        }
+        
+        if (selectedLayers.length === 0) {
+            app.endUndoGroup();
+            return "error|No layers selected";
+        }
+        
+        // Check if there are selected keyframes
+        var hasSelectedKeyframes = checkForSelectedKeyframes(selectedLayers);
+        
+        if (hasSelectedKeyframes) {
+            // KEYFRAME MODE: Move selected keyframes to layer's in point
+            var result = moveSelectedKeysToLayerInPoint(selectedLayers, comp);
+            app.endUndoGroup();
+            return result;
+        } else {
+            // LAYER MODE: Trim each layer's in point to its first keyframe
+            var result = trimLayersInPointToFirstKeyframe(selectedLayers);
+            app.endUndoGroup();
+            return result;
+        }
+    } catch(e) {
+        app.endUndoGroup();
+        return "error|" + e.toString();
+    }
+}
+
+/**
+ * Handle trim out point operation - called from panel
+ * If keyframes selected: Move selected keyframes so last keyframe lands on layer's out point
+ * If no keyframes selected: Trim each layer's out point to its last keyframe
+ */
+function handleTrimOutPoint() {
+    try {
+        DEBUG_JSX.clear();
+        DEBUG_JSX.log("handleTrimOutPoint called");
+        app.beginUndoGroup("Trim Out Point");
+        
+        var comp = app.project.activeItem;
+        if (!comp || !(comp instanceof CompItem)) {
+            app.endUndoGroup();
+            return "error|No active composition";
+        }
+        
+        var selectedLayers = [];
+        for (var i = 0; i < comp.selectedLayers.length; i++) {
+            selectedLayers.push(comp.selectedLayers[i]);
+        }
+        
+        if (selectedLayers.length === 0) {
+            app.endUndoGroup();
+            return "error|No layers selected";
+        }
+        
+        // Check if there are selected keyframes
+        var hasSelectedKeyframes = checkForSelectedKeyframes(selectedLayers);
+        
+        if (hasSelectedKeyframes) {
+            // KEYFRAME MODE: Move selected keyframes to layer's out point
+            var result = moveSelectedKeysToLayerOutPoint(selectedLayers, comp);
+            app.endUndoGroup();
+            return result;
+        } else {
+            // LAYER MODE: Trim each layer's out point to its last keyframe
+            var result = trimLayersOutPointToLastKeyframe(selectedLayers);
+            app.endUndoGroup();
+            return result;
+        }
+    } catch(e) {
+        app.endUndoGroup();
+        return "error|" + e.toString();
+    }
+}
+
+/**
+ * Handle trim in-out point operation - called from panel
+ * If keyframes selected: Does nothing (as per spec)
+ * If no keyframes selected: Trim both in and out points to first/last keyframes
+ */
+function handleTrimInOutPoint() {
+    try {
+        DEBUG_JSX.clear();
+        DEBUG_JSX.log("handleTrimInOutPoint called");
+        app.beginUndoGroup("Trim In-Out Point");
+        
+        var comp = app.project.activeItem;
+        if (!comp || !(comp instanceof CompItem)) {
+            app.endUndoGroup();
+            return "error|No active composition";
+        }
+        
+        var selectedLayers = [];
+        for (var i = 0; i < comp.selectedLayers.length; i++) {
+            selectedLayers.push(comp.selectedLayers[i]);
+        }
+        
+        if (selectedLayers.length === 0) {
+            app.endUndoGroup();
+            return "error|No layers selected";
+        }
+        
+        // Check if there are selected keyframes
+        var hasSelectedKeyframes = checkForSelectedKeyframes(selectedLayers);
+        
+        if (hasSelectedKeyframes) {
+            // KEYFRAME MODE: In-out with keyframes does nothing
+            app.endUndoGroup();
+            return "info|In-out point does nothing when keyframes are selected";
+        } else {
+            // LAYER MODE: Trim both in and out points
+            var result = trimLayersInOutPoints(selectedLayers);
+            app.endUndoGroup();
+            return result;
+        }
+    } catch(e) {
+        app.endUndoGroup();
+        return "error|" + e.toString();
+    }
+}
+
+/**
+ * Check if any keyframes are selected across all layers
+ */
+function checkForSelectedKeyframes(layers) {
+    for (var i = 0; i < layers.length; i++) {
+        var layer = layers[i];
+        var selectedProps = layer.selectedProperties;
+        
+        for (var j = 0; j < selectedProps.length; j++) {
+            var prop = selectedProps[j];
+            if (!prop || prop.propertyValueType === PropertyValueType.NO_VALUE) continue;
+            if (!prop.canVaryOverTime || prop.numKeys === 0) continue;
+            
+            for (var k = 1; k <= prop.numKeys; k++) {
+                if (prop.keySelected(k)) {
+                    return true;
+                }
+            }
+        }
+        
+        // Also check Time Remap
+        if (layer.timeRemapEnabled && layer.timeRemap && layer.timeRemap.numKeys > 0) {
+            for (var k = 1; k <= layer.timeRemap.numKeys; k++) {
+                if (layer.timeRemap.keySelected(k)) {
+                    return true;
+                }
+            }
+        }
+    }
+    return false;
+}
+
+/**
+ * Find first keyframe time across all properties on a layer
+ */
+function findFirstKeyframeOnLayer(layer) {
+    var firstTime = null;
+
+    function checkProperty(prop) {
+        if (!prop) return;
+
+        // Skip Marker property (we don't want to trim to markers)
+        if (prop.matchName === "ADBE Marker" || prop.name === "Marker" || prop.name === "Markers") {
+            return;
+        }
+
+        // Check if this is a property group
+        if (prop.propertyType === PropertyType.INDEXED_GROUP ||
+            prop.propertyType === PropertyType.NAMED_GROUP) {
+            for (var i = 1; i <= prop.numProperties; i++) {
+                checkProperty(prop.property(i));
+            }
+            return;
+        }
+
+        // Check if it's an animatable property with keyframes
+        if (prop.canVaryOverTime && prop.numKeys > 0) {
+            var keyTime = prop.keyTime(1); // First keyframe
+            if (firstTime === null || keyTime < firstTime) {
+                firstTime = keyTime;
+            }
+        }
+    }
+
+    // Check all properties
+    for (var i = 1; i <= layer.numProperties; i++) {
+        checkProperty(layer.property(i));
+    }
+
+    return firstTime;
+}
+
+/**
+ * Find last keyframe time across all properties on a layer
+ */
+function findLastKeyframeOnLayer(layer) {
+    var lastTime = null;
+
+    function checkProperty(prop) {
+        if (!prop) return;
+
+        // Skip Marker property (we don't want to trim to markers)
+        if (prop.matchName === "ADBE Marker" || prop.name === "Marker" || prop.name === "Markers") {
+            return;
+        }
+
+        // Check if this is a property group
+        if (prop.propertyType === PropertyType.INDEXED_GROUP ||
+            prop.propertyType === PropertyType.NAMED_GROUP) {
+            for (var i = 1; i <= prop.numProperties; i++) {
+                checkProperty(prop.property(i));
+            }
+            return;
+        }
+
+        // Check if it's an animatable property with keyframes
+        if (prop.canVaryOverTime && prop.numKeys > 0) {
+            var keyTime = prop.keyTime(prop.numKeys); // Last keyframe
+            if (lastTime === null || keyTime > lastTime) {
+                lastTime = keyTime;
+            }
+        }
+    }
+
+    // Check all properties
+    for (var i = 1; i <= layer.numProperties; i++) {
+        checkProperty(layer.property(i));
+    }
+
+    return lastTime;
+}
+
+/**
+ * LAYER MODE: Trim each layer's in point to its first keyframe
+ */
+function trimLayersInPointToFirstKeyframe(layers) {
+    var layersProcessed = 0;
+
+    for (var i = 0; i < layers.length; i++) {
+        var layer = layers[i];
+        var firstKeyTime = findFirstKeyframeOnLayer(layer);
+
+        if (firstKeyTime !== null) {
+            // Store current out point to preserve it
+            var currentOutPoint = layer.outPoint;
+
+            // Trim in point to first keyframe time
+            layer.inPoint = firstKeyTime;
+
+            // Restore out point (AE may have shifted it)
+            layer.outPoint = currentOutPoint;
+
+            layersProcessed++;
+            DEBUG_JSX.log("Trimmed " + layer.name + " in point to " + firstKeyTime);
+        }
+    }
+
+    if (layersProcessed === 0) {
+        return "error|No keyframes found on selected layers";
+    }
+
+    return "success|Trimmed in point on " + layersProcessed + " layer" + (layersProcessed > 1 ? "s" : "");
+}
+
+/**
+ * LAYER MODE: Trim each layer's out point to its last keyframe
+ */
+function trimLayersOutPointToLastKeyframe(layers) {
+    var layersProcessed = 0;
+    
+    for (var i = 0; i < layers.length; i++) {
+        var layer = layers[i];
+        var lastKeyTime = findLastKeyframeOnLayer(layer);
+        
+        if (lastKeyTime !== null) {
+            // Trim out point to last keyframe time
+            layer.outPoint = lastKeyTime;
+            layersProcessed++;
+            DEBUG_JSX.log("Trimmed " + layer.name + " out point to " + lastKeyTime);
+        }
+    }
+    
+    if (layersProcessed === 0) {
+        return "error|No keyframes found on selected layers";
+    }
+    
+    return "success|Trimmed out point on " + layersProcessed + " layer" + (layersProcessed > 1 ? "s" : "");
+}
+
+/**
+ * LAYER MODE: Trim both in and out points
+ */
+function trimLayersInOutPoints(layers) {
+    var layersProcessed = 0;
+    
+    for (var i = 0; i < layers.length; i++) {
+        var layer = layers[i];
+        var firstKeyTime = findFirstKeyframeOnLayer(layer);
+        var lastKeyTime = findLastKeyframeOnLayer(layer);
+        
+        if (firstKeyTime !== null && lastKeyTime !== null) {
+            layer.inPoint = firstKeyTime;
+            layer.outPoint = lastKeyTime;
+            layersProcessed++;
+            DEBUG_JSX.log("Trimmed " + layer.name + " in/out to " + firstKeyTime + " - " + lastKeyTime);
+        }
+    }
+    
+    if (layersProcessed === 0) {
+        return "error|No keyframes found on selected layers";
+    }
+    
+    return "success|Trimmed in-out point on " + layersProcessed + " layer" + (layersProcessed > 1 ? "s" : "");
+}
+
+/**
+ * KEYFRAME MODE: Move selected keyframes so first selected keyframe lands on layer's in point
+ * All keyframes (across all properties) move as a group, maintaining relative timing
+ * Layer markers within the keyframe range also move
+ */
+function moveSelectedKeysToLayerInPoint(layers, comp) {
+    var propertiesProcessed = 0;
+    var keyframesMoved = 0;
+    var markersMoved = 0;
+    var processedSelections = []; // Store selections for final restoration pass
+
+    // Process each layer separately
+    for (var layerIdx = 0; layerIdx < layers.length; layerIdx++) {
+        var layer = layers[layerIdx];
+        var targetTime = layer.inPoint;
+        
+        // Collect all selected keyframe data for this layer
+        var allSelectedKeyData = []; // {prop, keyIndex, time, keyData}
+        var selectedProps = layer.selectedProperties;
+        var hasTimeRemapFromSelectedProps = false;
+
+        for (var propIdx = 0; propIdx < selectedProps.length; propIdx++) {
+            var prop = selectedProps[propIdx];
+            if (!prop || prop.propertyValueType === PropertyValueType.NO_VALUE) continue;
+            if (!prop.canVaryOverTime || prop.numKeys === 0) continue;
+
+            // Track if Time Remap is in selectedProperties
+            if (prop.name === "Time Remap" || (prop.matchName && prop.matchName === "ADBE Time Remapping")) {
+                hasTimeRemapFromSelectedProps = true;
+            }
+
+            for (var k = 1; k <= prop.numKeys; k++) {
+                if (prop.keySelected(k)) {
+                    allSelectedKeyData.push({
+                        prop: prop,
+                        keyIndex: k,
+                        time: prop.keyTime(k),
+                        keyData: captureKeyframeState(prop, k)
+                    });
+                }
+            }
+        }
+
+        // Also check Time Remap (only if not already collected from selectedProperties)
+        if (!hasTimeRemapFromSelectedProps && layer.timeRemapEnabled && layer.timeRemap && layer.timeRemap.numKeys > 0) {
+            var tr = layer.timeRemap;
+            for (var k = 1; k <= tr.numKeys; k++) {
+                if (tr.keySelected(k)) {
+                    allSelectedKeyData.push({
+                        prop: tr,
+                        keyIndex: k,
+                        time: tr.keyTime(k),
+                        keyData: captureKeyframeState(tr, k)
+                    });
+                }
+            }
+        }
+
+        if (allSelectedKeyData.length === 0) continue;
+
+        // Find the earliest selected keyframe time (across all properties)
+        var earliestTime = allSelectedKeyData[0].time;
+        for (var i = 1; i < allSelectedKeyData.length; i++) {
+            if (allSelectedKeyData[i].time < earliestTime) {
+                earliestTime = allSelectedKeyData[i].time;
+            }
+        }
+        
+        // Calculate offset to move earliest keyframe to target time
+        var timeOffset = targetTime - earliestTime;
+        
+        if (Math.abs(timeOffset) < 0.0001) continue; // Already at target
+        
+        // Find keyframe time range for marker detection
+        var latestTime = allSelectedKeyData[0].time;
+        for (var i = 1; i < allSelectedKeyData.length; i++) {
+            if (allSelectedKeyData[i].time > latestTime) {
+                latestTime = allSelectedKeyData[i].time;
+            }
+        }
+        
+        // Find layer markers within the keyframe range
+        var markersToMove = [];
+        if (layer.marker && layer.marker.numKeys > 0) {
+            for (var m = 1; m <= layer.marker.numKeys; m++) {
+                var markerTime = layer.marker.keyTime(m);
+                if (markerTime >= earliestTime && markerTime <= latestTime) {
+                    markersToMove.push({
+                        markerIndex: m,
+                        oldTime: markerTime,
+                        newTime: markerTime + timeOffset,
+                        markerValue: layer.marker.keyValue(m)
+                    });
+                }
+            }
+        }
+        
+        // Move markers first (in reverse order to preserve indices)
+        markersToMove.sort(function(a, b) { return b.markerIndex - a.markerIndex; });
+        for (var m = 0; m < markersToMove.length; m++) {
+            var mInfo = markersToMove[m];
+            try {
+                layer.marker.removeKey(mInfo.markerIndex);
+                var newIdx = layer.marker.addKey(Math.max(0, mInfo.newTime));
+                layer.marker.setValueAtKey(newIdx, mInfo.markerValue);
+                markersMoved++;
+            } catch(e) {
+                DEBUG_JSX.log("Failed to move marker: " + e.toString());
+            }
+        }
+        
+        // Group keyframes by property
+        var propKeyMap = {}; // propId -> [{keyIndex, time, keyData}]
+        for (var i = 0; i < allSelectedKeyData.length; i++) {
+            var kd = allSelectedKeyData[i];
+            var propId = getUniquePropertyId(kd.prop);
+            if (!propKeyMap[propId]) {
+                propKeyMap[propId] = { prop: kd.prop, keys: [] };
+            }
+            propKeyMap[propId].keys.push({
+                keyIndex: kd.keyIndex,
+                time: kd.time,
+                keyData: kd.keyData
+            });
+        }
+
+        // Process each property
+        for (var propId in propKeyMap) {
+            var propData = propKeyMap[propId];
+            var prop = propData.prop;
+            var keys = propData.keys;
+
+            // Check if this is Time Remap - needs special add-before-delete handling
+            var isTimeRemap = (prop.name === "Time Remap" || (prop.matchName && prop.matchName === "ADBE Time Remapping"));
+
+            if (isTimeRemap) {
+                // TIME REMAP: Complete add-before-delete pattern
+                var newKeyframeTimes = [];
+                var oldKeyframeTimes = [];
+
+                // STEP 1: Add ALL new keyframes first
+                for (var i = 0; i < keys.length; i++) {
+                    var kd = keys[i];
+                    var newTime = Math.max(0, kd.time + timeOffset);
+                    newKeyframeTimes.push(newTime);
+                    oldKeyframeTimes.push(kd.time);
+
+                    // Add new keyframe using setValueAtTime
+                    prop.setValueAtTime(newTime, kd.keyData.value);
+                    keyframesMoved++;
+                }
+
+                // STEP 2: Find old keyframes to delete (backwards search)
+                var oldKeyIndicesToRemove = [];
+                for (var i = 0; i < oldKeyframeTimes.length; i++) {
+                    var oldTime = oldKeyframeTimes[i];
+                    for (var j = prop.numKeys; j >= 1; j--) {
+                        var keyTime = prop.keyTime(j);
+                        if (Math.abs(keyTime - oldTime) < 0.001) {
+                            // Check this isn't a new keyframe (in case old/new times overlap)
+                            var isNewKey = false;
+                            for (var n = 0; n < newKeyframeTimes.length; n++) {
+                                if (Math.abs(keyTime - newKeyframeTimes[n]) < 0.001) {
+                                    isNewKey = true;
+                                    break;
+                                }
+                            }
+                            if (!isNewKey) {
+                                oldKeyIndicesToRemove.push(j);
+                                break;
+                            }
+                        }
+                    }
+                }
+
+                // STEP 3: Remove old keyframes in descending order
+                oldKeyIndicesToRemove.sort(function(a, b) { return b - a; });
+                for (var i = 0; i < oldKeyIndicesToRemove.length; i++) {
+                    prop.removeKey(oldKeyIndicesToRemove[i]);
+                }
+
+                // STEP 4: Find new keyframe indices and store for selection restoration
+                var newSelIndices = [];
+                for (var i = 0; i < newKeyframeTimes.length; i++) {
+                    for (var j = 1; j <= prop.numKeys; j++) {
+                        if (Math.abs(prop.keyTime(j) - newKeyframeTimes[i]) < 0.001) {
+                            newSelIndices.push(j);
+                            break;
+                        }
+                    }
+                }
+
+                // Store for final restoration pass
+                processedSelections.push({
+                    layer: layer,
+                    propertyReference: prop,
+                    newSelIndices: newSelIndices.slice()
+                });
+            } else {
+                // NORMAL PROPERTIES: Remove first, then add
+                // Sort by time descending (process later keys first)
+                keys.sort(function(a, b) { return b.time - a.time; });
+
+                // Remove keys in reverse time order
+                for (var i = 0; i < keys.length; i++) {
+                    prop.removeKey(keys[i].keyIndex);
+                }
+
+                // Re-add keys at new times (in forward time order)
+                keys.sort(function(a, b) { return a.time - b.time; });
+                var newKeyIndices = [];
+                for (var i = 0; i < keys.length; i++) {
+                    var newTime = Math.max(0, keys[i].time + timeOffset);
+                    var newIdx = prop.addKey(newTime);
+                    newKeyIndices.push(newIdx);
+
+                    // Restore keyframe state
+                    if (keys[i].keyData) {
+                        restoreKeyframeState(prop, newIdx, keys[i].keyData);
+                    }
+                    keyframesMoved++;
+                }
+
+                // Store for final restoration pass
+                processedSelections.push({
+                    layer: layer,
+                    propertyReference: prop,
+                    newSelIndices: newKeyIndices.slice()
+                });
+            }
+
+            propertiesProcessed++;
+        }
+    }
+
+    if (keyframesMoved === 0) {
+        return "error|No keyframes moved";
+    }
+
+    // GLOBAL SELECTION RESTORATION - do this AFTER all keyframe processing
+    for (var i = 0; i < processedSelections.length; i++) {
+        var selData = processedSelections[i];
+        var prop = selData.propertyReference;
+
+        if (!prop) continue;
+
+        // Clear all selections on this property first
+        for (var j = 1; j <= prop.numKeys; j++) {
+            try { prop.setSelectedAtKey(j, false); } catch(e) {}
+        }
+
+        // Select the new keyframes
+        for (var k = 0; k < selData.newSelIndices.length; k++) {
+            try { prop.setSelectedAtKey(selData.newSelIndices[k], true); } catch(e) {}
+        }
+    }
+
+    var msg = "Moved " + keyframesMoved + " keyframe" + (keyframesMoved > 1 ? "s" : "") + " to in point";
+    if (markersMoved > 0) {
+        msg += " (+" + markersMoved + " marker" + (markersMoved > 1 ? "s" : "") + ")";
+    }
+    return "success|" + msg;
+}
+
+/**
+ * KEYFRAME MODE: Move selected keyframes so last selected keyframe lands on layer's out point
+ * All keyframes (across all properties) move as a group, maintaining relative timing
+ * Layer markers within the keyframe range also move
+ */
+function moveSelectedKeysToLayerOutPoint(layers, comp) {
+    var propertiesProcessed = 0;
+    var keyframesMoved = 0;
+    var markersMoved = 0;
+    var processedSelections = []; // Store selections for final restoration pass
+
+    // Process each layer separately
+    for (var layerIdx = 0; layerIdx < layers.length; layerIdx++) {
+        var layer = layers[layerIdx];
+        var targetTime = layer.outPoint;
+        
+        // Collect all selected keyframe data for this layer
+        var allSelectedKeyData = []; // {prop, keyIndex, time, keyData}
+        var selectedProps = layer.selectedProperties;
+        var hasTimeRemapFromSelectedProps = false;
+
+        for (var propIdx = 0; propIdx < selectedProps.length; propIdx++) {
+            var prop = selectedProps[propIdx];
+            if (!prop || prop.propertyValueType === PropertyValueType.NO_VALUE) continue;
+            if (!prop.canVaryOverTime || prop.numKeys === 0) continue;
+
+            // Track if Time Remap is in selectedProperties
+            if (prop.name === "Time Remap" || (prop.matchName && prop.matchName === "ADBE Time Remapping")) {
+                hasTimeRemapFromSelectedProps = true;
+            }
+
+            for (var k = 1; k <= prop.numKeys; k++) {
+                if (prop.keySelected(k)) {
+                    allSelectedKeyData.push({
+                        prop: prop,
+                        keyIndex: k,
+                        time: prop.keyTime(k),
+                        keyData: captureKeyframeState(prop, k)
+                    });
+                }
+            }
+        }
+
+        // Also check Time Remap (only if not already collected from selectedProperties)
+        if (!hasTimeRemapFromSelectedProps && layer.timeRemapEnabled && layer.timeRemap && layer.timeRemap.numKeys > 0) {
+            var tr = layer.timeRemap;
+            for (var k = 1; k <= tr.numKeys; k++) {
+                if (tr.keySelected(k)) {
+                    allSelectedKeyData.push({
+                        prop: tr,
+                        keyIndex: k,
+                        time: tr.keyTime(k),
+                        keyData: captureKeyframeState(tr, k)
+                    });
+                }
+            }
+        }
+
+        if (allSelectedKeyData.length === 0) continue;
+
+        // Find the latest selected keyframe time (across all properties)
+        var latestTime = allSelectedKeyData[0].time;
+        for (var i = 1; i < allSelectedKeyData.length; i++) {
+            if (allSelectedKeyData[i].time > latestTime) {
+                latestTime = allSelectedKeyData[i].time;
+            }
+        }
+        
+        // Calculate offset to move latest keyframe to target time
+        var timeOffset = targetTime - latestTime;
+        
+        if (Math.abs(timeOffset) < 0.0001) continue; // Already at target
+        
+        // Find keyframe time range for marker detection
+        var earliestTime = allSelectedKeyData[0].time;
+        for (var i = 1; i < allSelectedKeyData.length; i++) {
+            if (allSelectedKeyData[i].time < earliestTime) {
+                earliestTime = allSelectedKeyData[i].time;
+            }
+        }
+        
+        // Find layer markers within the keyframe range
+        var markersToMove = [];
+        if (layer.marker && layer.marker.numKeys > 0) {
+            for (var m = 1; m <= layer.marker.numKeys; m++) {
+                var markerTime = layer.marker.keyTime(m);
+                if (markerTime >= earliestTime && markerTime <= latestTime) {
+                    markersToMove.push({
+                        markerIndex: m,
+                        oldTime: markerTime,
+                        newTime: markerTime + timeOffset,
+                        markerValue: layer.marker.keyValue(m)
+                    });
+                }
+            }
+        }
+        
+        // Move markers first (in reverse order to preserve indices)
+        markersToMove.sort(function(a, b) { return b.markerIndex - a.markerIndex; });
+        for (var m = 0; m < markersToMove.length; m++) {
+            var mInfo = markersToMove[m];
+            try {
+                layer.marker.removeKey(mInfo.markerIndex);
+                var newIdx = layer.marker.addKey(Math.max(0, mInfo.newTime));
+                layer.marker.setValueAtKey(newIdx, mInfo.markerValue);
+                markersMoved++;
+            } catch(e) {
+                DEBUG_JSX.log("Failed to move marker: " + e.toString());
+            }
+        }
+        
+        // Group keyframes by property
+        var propKeyMap = {}; // propId -> [{keyIndex, time, keyData}]
+        for (var i = 0; i < allSelectedKeyData.length; i++) {
+            var kd = allSelectedKeyData[i];
+            var propId = getUniquePropertyId(kd.prop);
+            if (!propKeyMap[propId]) {
+                propKeyMap[propId] = { prop: kd.prop, keys: [] };
+            }
+            propKeyMap[propId].keys.push({
+                keyIndex: kd.keyIndex,
+                time: kd.time,
+                keyData: kd.keyData
+            });
+        }
+
+        // Process each property
+        for (var propId in propKeyMap) {
+            var propData = propKeyMap[propId];
+            var prop = propData.prop;
+            var keys = propData.keys;
+
+            // Check if this is Time Remap - needs special add-before-delete handling
+            var isTimeRemap = (prop.name === "Time Remap" || (prop.matchName && prop.matchName === "ADBE Time Remapping"));
+
+            if (isTimeRemap) {
+                // TIME REMAP: Complete add-before-delete pattern
+                var newKeyframeTimes = [];
+                var oldKeyframeTimes = [];
+
+                // STEP 1: Add ALL new keyframes first
+                for (var i = 0; i < keys.length; i++) {
+                    var kd = keys[i];
+                    var newTime = Math.max(0, kd.time + timeOffset);
+                    newKeyframeTimes.push(newTime);
+                    oldKeyframeTimes.push(kd.time);
+
+                    // Add new keyframe using setValueAtTime
+                    prop.setValueAtTime(newTime, kd.keyData.value);
+                    keyframesMoved++;
+                }
+
+                // STEP 2: Find old keyframes to delete (backwards search)
+                var oldKeyIndicesToRemove = [];
+                for (var i = 0; i < oldKeyframeTimes.length; i++) {
+                    var oldTime = oldKeyframeTimes[i];
+                    for (var j = prop.numKeys; j >= 1; j--) {
+                        var keyTime = prop.keyTime(j);
+                        if (Math.abs(keyTime - oldTime) < 0.001) {
+                            // Check this isn't a new keyframe (in case old/new times overlap)
+                            var isNewKey = false;
+                            for (var n = 0; n < newKeyframeTimes.length; n++) {
+                                if (Math.abs(keyTime - newKeyframeTimes[n]) < 0.001) {
+                                    isNewKey = true;
+                                    break;
+                                }
+                            }
+                            if (!isNewKey) {
+                                oldKeyIndicesToRemove.push(j);
+                                break;
+                            }
+                        }
+                    }
+                }
+
+                // STEP 3: Remove old keyframes in descending order
+                oldKeyIndicesToRemove.sort(function(a, b) { return b - a; });
+                for (var i = 0; i < oldKeyIndicesToRemove.length; i++) {
+                    prop.removeKey(oldKeyIndicesToRemove[i]);
+                }
+
+                // STEP 4: Find new keyframe indices and store for selection restoration
+                var newSelIndices = [];
+                for (var i = 0; i < newKeyframeTimes.length; i++) {
+                    for (var j = 1; j <= prop.numKeys; j++) {
+                        if (Math.abs(prop.keyTime(j) - newKeyframeTimes[i]) < 0.001) {
+                            newSelIndices.push(j);
+                            break;
+                        }
+                    }
+                }
+
+                // Store for final restoration pass
+                processedSelections.push({
+                    layer: layer,
+                    propertyReference: prop,
+                    newSelIndices: newSelIndices.slice()
+                });
+            } else {
+                // NORMAL PROPERTIES: Remove first, then add
+                // Sort by time descending (process later keys first)
+                keys.sort(function(a, b) { return b.time - a.time; });
+
+                // Remove keys in reverse time order
+                for (var i = 0; i < keys.length; i++) {
+                    prop.removeKey(keys[i].keyIndex);
+                }
+
+                // Re-add keys at new times (in forward time order)
+                keys.sort(function(a, b) { return a.time - b.time; });
+                var newKeyIndices = [];
+                for (var i = 0; i < keys.length; i++) {
+                    var newTime = Math.max(0, keys[i].time + timeOffset);
+                    var newIdx = prop.addKey(newTime);
+                    newKeyIndices.push(newIdx);
+
+                    // Restore keyframe state
+                    if (keys[i].keyData) {
+                        restoreKeyframeState(prop, newIdx, keys[i].keyData);
+                    }
+                    keyframesMoved++;
+                }
+
+                // Store for final restoration pass
+                processedSelections.push({
+                    layer: layer,
+                    propertyReference: prop,
+                    newSelIndices: newKeyIndices.slice()
+                });
+            }
+
+            propertiesProcessed++;
+        }
+    }
+
+    if (keyframesMoved === 0) {
+        return "error|No keyframes moved";
+    }
+
+    // GLOBAL SELECTION RESTORATION - do this AFTER all keyframe processing
+    for (var i = 0; i < processedSelections.length; i++) {
+        var selData = processedSelections[i];
+        var prop = selData.propertyReference;
+
+        if (!prop) continue;
+
+        // Clear all selections on this property first
+        for (var j = 1; j <= prop.numKeys; j++) {
+            try { prop.setSelectedAtKey(j, false); } catch(e) {}
+        }
+
+        // Select the new keyframes
+        for (var k = 0; k < selData.newSelIndices.length; k++) {
+            try { prop.setSelectedAtKey(selData.newSelIndices[k], true); } catch(e) {}
+        }
+    }
+
+    var msg = "Moved " + keyframesMoved + " keyframe" + (keyframesMoved > 1 ? "s" : "") + " to out point";
+    if (markersMoved > 0) {
+        msg += " (+" + markersMoved + " marker" + (markersMoved > 1 ? "s" : "") + ")";
+    }
+    return "success|" + msg;
+}
+
+// ============================================================================
+// COPY/PASTE KEYFRAMES
+// ============================================================================
+
+// Global clipboard storage for copy/paste
+var KEYFRAME_CLIPBOARD = null;
+
+/**
+ * Get unique property match path using matchNames
+ * This creates a path like "ADBE Transform Group|ADBE Position" for exact matching
+ */
+function getPropertyMatchPath(prop) {
+    var pathParts = [];
+    var current = prop;
+    
+    while (current) {
+        if (current.matchName && current.propertyType !== undefined) {
+            // Don't include layer-level properties
+            if (current.matchName.indexOf("ADBE Layer") === -1 && 
+                current.matchName.indexOf("ADBE Root") === -1) {
+                pathParts.unshift(current.matchName);
+            }
+        }
+        current = current.parentProperty;
+    }
+    
+    return pathParts.join("|");
+}
+
+/**
+ * Find a property on a layer by its match path
+ * Returns null if not found
+ */
+function findPropertyByMatchPath(layer, targetPathStr) {
+    if (!targetPathStr) return null;
+    
+    var targetPath = targetPathStr.split("|");
+    
+    function findRecursive(propGroup, pathIndex) {
+        if (pathIndex >= targetPath.length) {
+            return null;
+        }
+        
+        var targetMatchName = targetPath[pathIndex];
+        
+        for (var i = 1; i <= propGroup.numProperties; i++) {
+            var prop;
+            try {
+                prop = propGroup.property(i);
+            } catch(e) {
+                continue;
+            }
+            if (!prop) continue;
+            
+            if (prop.matchName === targetMatchName) {
+                if (pathIndex === targetPath.length - 1) {
+                    // Found the final property
+                    return prop;
+                } else if (prop.propertyType === PropertyType.INDEXED_GROUP || 
+                           prop.propertyType === PropertyType.NAMED_GROUP) {
+                    // Continue searching in this group
+                    var found = findRecursive(prop, pathIndex + 1);
+                    if (found) return found;
+                }
+            }
+        }
+        
+        return null;
+    }
+    
+    return findRecursive(layer, 0);
+}
+
+/**
+ * Copy selected keyframes from a single layer
+ * Copies all selected keyframes from all selected properties, plus markers in range
+ */
+function copySelectedKeyframes() {
+    try {
+        DEBUG_JSX.clear();
+        DEBUG_JSX.log("copySelectedKeyframes called");
+        
+        var comp = app.project.activeItem;
+        if (!comp || !(comp instanceof CompItem)) {
+            return "error|No active composition";
+        }
+        
+        var selectedLayers = comp.selectedLayers;
+        if (selectedLayers.length === 0) {
+            return "error|No layer selected";
+        }
+        
+        if (selectedLayers.length > 1) {
+            return "error|Copy works on multiple properties but just one layer.\nPlease select only one layer.";
+        }
+        
+        var layer = selectedLayers[0];
+        var selectedProps = layer.selectedProperties;
+        
+        // Collect all selected keyframes
+        var copiedProperties = [];
+        var allKeyframeTimes = [];
+        
+        for (var i = 0; i < selectedProps.length; i++) {
+            var prop = selectedProps[i];
+            if (!prop || prop.propertyValueType === PropertyValueType.NO_VALUE) continue;
+            if (!prop.canVaryOverTime || prop.numKeys === 0) continue;
+            
+            var selectedKeyframes = [];
+            for (var k = 1; k <= prop.numKeys; k++) {
+                if (prop.keySelected(k)) {
+                    var keyData = captureKeyframeState(prop, k);
+                    if (keyData) {
+                        selectedKeyframes.push(keyData);
+                        allKeyframeTimes.push(keyData.time);
+                    }
+                }
+            }
+            
+            if (selectedKeyframes.length > 0) {
+                copiedProperties.push({
+                    matchPath: getPropertyMatchPath(prop),
+                    name: prop.name,
+                    keyframes: selectedKeyframes
+                });
+            }
+        }
+        
+        // Also check Time Remap
+        if (layer.timeRemapEnabled && layer.timeRemap && layer.timeRemap.numKeys > 0) {
+            var selectedKeyframes = [];
+            for (var k = 1; k <= layer.timeRemap.numKeys; k++) {
+                if (layer.timeRemap.keySelected(k)) {
+                    var keyData = captureKeyframeState(layer.timeRemap, k);
+                    if (keyData) {
+                        selectedKeyframes.push(keyData);
+                        allKeyframeTimes.push(keyData.time);
+                    }
+                }
+            }
+            
+            if (selectedKeyframes.length > 0) {
+                copiedProperties.push({
+                    matchPath: getPropertyMatchPath(layer.timeRemap),
+                    name: "Time Remap",
+                    keyframes: selectedKeyframes
+                });
+            }
+        }
+        
+        if (copiedProperties.length === 0) {
+            return "error|No keyframes selected to copy";
+        }
+        
+        // Find earliest and latest keyframe times
+        allKeyframeTimes.sort(function(a, b) { return a - b; });
+        var firstKeyframeTime = allKeyframeTimes[0];
+        var lastKeyframeTime = allKeyframeTimes[allKeyframeTimes.length - 1];
+        
+        // Convert keyframe times to relative times (relative to first keyframe)
+        for (var p = 0; p < copiedProperties.length; p++) {
+            var keyframes = copiedProperties[p].keyframes;
+            for (var k = 0; k < keyframes.length; k++) {
+                keyframes[k].relativeTime = keyframes[k].time - firstKeyframeTime;
+            }
+        }
+        
+        // Collect markers within keyframe range
+        var copiedMarkers = [];
+        if (layer.marker && layer.marker.numKeys > 0) {
+            for (var m = 1; m <= layer.marker.numKeys; m++) {
+                var markerTime = layer.marker.keyTime(m);
+                if (markerTime >= firstKeyframeTime && markerTime <= lastKeyframeTime) {
+                    copiedMarkers.push({
+                        relativeTime: markerTime - firstKeyframeTime,
+                        markerValue: layer.marker.keyValue(m)
+                    });
+                }
+            }
+        }
+        
+        // Store in global clipboard
+        KEYFRAME_CLIPBOARD = {
+            properties: copiedProperties,
+            markers: copiedMarkers,
+            firstKeyframeTime: firstKeyframeTime,
+            sourceLayerName: layer.name
+        };
+        
+        // Build success message
+        var keyframeCount = 0;
+        for (var p = 0; p < copiedProperties.length; p++) {
+            keyframeCount += copiedProperties[p].keyframes.length;
+        }
+        
+        var msg = "Copied " + keyframeCount + " keyframe" + (keyframeCount > 1 ? "s" : "");
+        msg += " from " + copiedProperties.length + " propert" + (copiedProperties.length > 1 ? "ies" : "y");
+        if (copiedMarkers.length > 0) {
+            msg += " (+" + copiedMarkers.length + " marker" + (copiedMarkers.length > 1 ? "s" : "") + ")";
+        }
+        
+        DEBUG_JSX.log(msg);
+        return "success|" + msg;
+    } catch(e) {
+        DEBUG_JSX.log("Copy error: " + e.toString());
+        return "error|" + e.toString();
+    }
+}
+
+/**
+ * Paste keyframes to selected layers at playhead position
+ * Pastes to matching properties, reports any missing properties
+ */
+function pasteKeyframes() {
+    try {
+        DEBUG_JSX.clear();
+        DEBUG_JSX.log("pasteKeyframes called");
+        
+        if (!KEYFRAME_CLIPBOARD || !KEYFRAME_CLIPBOARD.properties || KEYFRAME_CLIPBOARD.properties.length === 0) {
+            return "error|Nothing to paste. Copy keyframes first.";
+        }
+        
+        var comp = app.project.activeItem;
+        if (!comp || !(comp instanceof CompItem)) {
+            return "error|No active composition";
+        }
+        
+        var selectedLayers = [];
+        for (var i = 0; i < comp.selectedLayers.length; i++) {
+            selectedLayers.push(comp.selectedLayers[i]);
+        }
+        
+        if (selectedLayers.length === 0) {
+            return "error|No layers selected to paste onto";
+        }
+        
+        app.beginUndoGroup("Paste Keyframes");
+        
+        var playheadTime = comp.time;
+        var keyframesPasted = 0;
+        var markersPasted = 0;
+        var propertiesPasted = 0;
+        var missingProperties = []; // Track which properties couldn't be found
+        
+        for (var layerIdx = 0; layerIdx < selectedLayers.length; layerIdx++) {
+            var layer = selectedLayers[layerIdx];
+            
+            // Paste each property's keyframes
+            for (var p = 0; p < KEYFRAME_CLIPBOARD.properties.length; p++) {
+                var propData = KEYFRAME_CLIPBOARD.properties[p];
+                var targetProp = findPropertyByMatchPath(layer, propData.matchPath);
+                
+                if (!targetProp) {
+                    // Track missing property (avoid duplicates)
+                    var alreadyListed = false;
+                    for (var m = 0; m < missingProperties.length; m++) {
+                        if (missingProperties[m] === propData.name) {
+                            alreadyListed = true;
+                            break;
+                        }
+                    }
+                    if (!alreadyListed) {
+                        missingProperties.push(propData.name);
+                    }
+                    continue;
+                }
+                
+                // Paste keyframes
+                var keyframes = propData.keyframes;
+                var newKeyIndices = [];
+                
+                for (var k = 0; k < keyframes.length; k++) {
+                    var kf = keyframes[k];
+                    var newTime = playheadTime + kf.relativeTime;
+                    
+                    // Add keyframe at new time
+                    var newIdx = targetProp.addKey(newTime);
+                    newKeyIndices.push(newIdx);
+                    
+                    // Restore all keyframe properties (value, easing, label, etc.)
+                    restoreKeyframeState(targetProp, newIdx, kf);
+                    
+                    keyframesPasted++;
+                }
+                
+                // Select the pasted keyframes
+                for (var k = 0; k < newKeyIndices.length; k++) {
+                    try { targetProp.setSelectedAtKey(newKeyIndices[k], true); } catch(e) {}
+                }
+                
+                propertiesPasted++;
+            }
+            
+            // Paste markers to this layer
+            for (var m = 0; m < KEYFRAME_CLIPBOARD.markers.length; m++) {
+                var markerData = KEYFRAME_CLIPBOARD.markers[m];
+                var newMarkerTime = playheadTime + markerData.relativeTime;
+                
+                try {
+                    var newMarkerIdx = layer.marker.addKey(newMarkerTime);
+                    layer.marker.setValueAtKey(newMarkerIdx, markerData.markerValue);
+                    markersPasted++;
+                } catch(e) {
+                    DEBUG_JSX.log("Failed to paste marker: " + e.toString());
+                }
+            }
+        }
+        
+        app.endUndoGroup();
+        
+        // Build result message
+        var msg = "";
+        if (keyframesPasted > 0) {
+            msg = "Pasted " + keyframesPasted + " keyframe" + (keyframesPasted > 1 ? "s" : "");
+            msg += " to " + selectedLayers.length + " layer" + (selectedLayers.length > 1 ? "s" : "");
+            if (markersPasted > 0) {
+                msg += " (+" + markersPasted + " marker" + (markersPasted > 1 ? "s" : "") + ")";
+            }
+            if (missingProperties.length > 0) {
+                msg += "\nMissing: " + missingProperties.join(", ");
+                return "warning|" + msg;
+            }
+            return "success|" + msg;
+        } else if (missingProperties.length > 0) {
+            return "error|Could not find properties: " + missingProperties.join(", ");
+        } else {
+            return "error|No keyframes pasted";
+        }
+    } catch(e) {
+        app.endUndoGroup();
+        DEBUG_JSX.log("Paste error: " + e.toString());
+        return "error|" + e.toString();
     }
 }
