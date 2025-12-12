@@ -1,0 +1,467 @@
+/* Dark theme to match After Effects */
+body {
+    margin: 0;
+    padding: 0;
+    background-color: #262626;
+    color: #ffffff;
+    font-family: 'Adobe Clean', 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+    font-size: 12px;
+    user-select: none;
+    overflow-x: hidden;
+    overflow-y: auto;
+}
+
+.container {
+    padding: 6px 10px 10px 10px;
+    display: flex;
+    flex-direction: column;
+    min-height: 100vh;
+    box-sizing: border-box;
+}
+
+/* Section container styling */
+.section-container {
+    background-color: #2a2a2a;
+    border: 1px solid rgba(255, 255, 255, 0.14);
+    border-radius: 6px;
+    padding: 12px 10px;
+    margin-bottom: 10px;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.15), 0 1px 3px rgba(0,0,0,0.1);
+    transition: transform 0.3s ease, border-color 0.1s cubic-bezier(0.4, 0.0, 0.2, 1);
+}
+
+.section-container:hover {
+    border-color: rgba(255, 255, 255, 0.20);
+}
+
+.section-container:last-child {
+    margin-bottom: 0;
+}
+
+/* Main section styling */
+.section {
+    margin: 0;
+    padding: 0;
+}
+
+.section-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+    margin: 0 0 10px 0;
+    padding: 0;
+}
+
+.section-header h2 {
+    color: #ffffff;
+    font-size: 12px;
+    font-weight: 500;
+    margin: 0;
+    padding: 0;
+    border: none;
+    text-transform: none;
+    letter-spacing: 0.5px;
+}
+
+/* Section content container */
+.section-content {
+    overflow: hidden;
+    transition: max-height 0.25s cubic-bezier(0.20, 0.00, 0.20, 1.00), opacity 0.25s cubic-bezier(0.20, 0.00, 0.20, 1.00);
+    max-height: 500px;
+    opacity: 1;
+}
+
+/* Shared flex layout for controls */
+.control-row {
+    display: flex;
+    gap: 10px;
+    margin-bottom: 10px;
+    align-items: stretch;
+}
+
+/* Keyframe Nudger top row equal widths */
+.keyframe-top-row > .stagger-btn,
+.keyframe-top-row > .stagger-input {
+    flex: 0 0 calc(20% - 8px);
+    width: calc(20% - 8px);
+    min-width: 0;
+    height: 35px;
+    margin: 0;
+    box-sizing: border-box;
+}
+
+/* Make top-row buttons match input height for visual parity */
+.keyframe-top-row .stagger-btn {
+    height: 35px;
+    border-radius: 6px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 0;
+}
+
+/* Ensure SVG icons are properly centered */
+.keyframe-top-row .stagger-btn svg,
+.keyframe-top-row .stagger-btn img {
+    display: block;
+    margin: 0 auto;
+    transition: transform 0.3s ease;
+}
+
+/* Stagger direction button flip animation */
+.keyframe-top-row .stagger-btn.flipped svg {
+    transform: scaleX(-1);
+}
+
+/* Ensure global input visually matches buttons in top row */
+.keyframe-top-row .stagger-input {
+    height: 35px !important;
+    line-height: 35px;
+    font-size: 12.5px;
+    padding: 2px 0 0 0;
+    box-sizing: border-box;
+    vertical-align: middle;
+    border-radius: 6px;
+    box-shadow: 0 3px 6px rgba(0,0,0,0.15);
+    background-color: #1a1a1a;
+    border: 1px solid rgba(255, 255, 255, 0.16);
+    text-align: center;
+}
+
+.keyframe-top-row .stagger-input:hover {
+    border-color: rgba(255, 255, 255, 0.24);
+}
+
+.keyframe-top-row .stagger-input:focus {
+    background-color: #1a1a1a;
+    border-color: #4a90e2;
+    box-shadow: 0 3px 6px rgba(0,0,0,0.15);
+}
+
+/* Make stagger +/- match delay/duration widths */
+#staggerRow .distance-controls {
+    width: calc(33.33% - 12px);
+}
+#staggerRow .distance-controls .stagger-btn {
+    width: calc(50% - 3px);
+}
+
+.control-row:last-child {
+    margin-bottom: 0;
+}
+
+.control-row > * {
+    flex: 1;
+    width: calc(50% - 5px);
+}
+
+/* Resolution display - styled like dropdown */
+.resolution-display {
+    position: relative;
+    height: 36px;
+    background-color: #222222;
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    border-radius: 6px;
+    color: #cccccc;
+    font-size: 12.5px;
+    font-weight: 500;
+    padding: 0 38% 0 12px;
+    display: flex;
+    align-items: center;
+    user-select: none;
+    pointer-events: none;
+    white-space: nowrap;
+}
+
+/* Keyframe Reader labels with reduced opacity */
+#durationText,
+#staggerText,
+#xDistanceText,
+#yDistanceText {
+    opacity: 0.75;
+}
+
+/* Keyframe display - styled like resolution display but without buttons */
+.keyframe-display {
+    position: relative;
+    height: 36px;
+    background-color: #222222;
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    border-radius: 6px;
+    color: #cccccc;
+    font-size: 12.5px;
+    font-weight: 500;
+    padding: 0 12px;
+    display: flex;
+    align-items: center;
+    user-select: none;
+    white-space: nowrap;
+}
+
+.resolution-display .stagger-controls {
+    position: absolute;
+    right: 6px;
+    top: 50%;
+    transform: translateY(-50%);
+    width: calc(33.33% - 12px);
+    display: flex;
+    gap: 6px;
+    pointer-events: all;
+    padding: 0;
+}
+
+.resolution-display .stagger-controls .stagger-btn {
+    width: calc(50% - 3px);
+}
+
+/* Distance controls - 4 buttons for In/Out/−/+ */
+.keyframe-display .distance-controls {
+    position: absolute;
+    right: 6px;
+    top: 50%;
+    transform: translateY(-50%);
+    width: calc(50% - 18px);
+    display: flex;
+    gap: 6px;
+    pointer-events: all;
+    padding: 0;
+}
+
+.keyframe-display .distance-controls .distance-btn {
+    width: calc(25% - 4.5px);
+    margin: 0;
+    background-color: #2f2f2f;
+    color: #cccccc;
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    box-shadow: 0 3px 6px rgba(0,0,0,0.15);
+    cursor: pointer;
+    transition: all 0.1s cubic-bezier(0.4, 0.0, 0.2, 1);
+    font-size: 11px;
+    font-weight: 500;
+    height: 26px;
+    border-radius: 4px;
+    outline: none;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.keyframe-display .distance-controls .distance-btn:hover {
+    background-color: #3c3c3c;
+    color: #ffffff;
+    box-shadow: 0 4px 8px rgba(0,0,0,0.4);
+}
+
+.keyframe-display .distance-controls .distance-btn:active {
+    transform: scale(0.96);
+}
+
+.keyframe-display .distance-controls .distance-btn:focus {
+    outline: none;
+}
+
+.keyframe-display .distance-controls .distance-btn.nudge-btn {
+    font-size: 13px;
+}
+
+/* CSS triangles for perfectly aligned directional arrows */
+.triangle {
+    display: inline-block;
+    width: 0;
+    height: 0;
+}
+
+.triangle-right {
+    border-left: 5px solid #cccccc;
+    border-top: 4px solid transparent;
+    border-bottom: 4px solid transparent;
+}
+
+.triangle-left {
+    border-right: 5px solid #cccccc;
+    border-top: 4px solid transparent;
+    border-bottom: 4px solid transparent;
+}
+
+.triangle-up {
+    border-bottom: 5px solid #cccccc;
+    border-left: 4px solid transparent;
+    border-right: 4px solid transparent;
+    transform: translateY(-1px);
+}
+
+.triangle-down {
+    border-top: 5px solid #cccccc;
+    border-left: 4px solid transparent;
+    border-right: 4px solid transparent;
+    transform: translateY(-1px);
+}
+
+/* Change triangle color on hover */
+.distance-btn:hover .triangle-right {
+    border-left-color: #ffffff;
+}
+
+.distance-btn:hover .triangle-left {
+    border-right-color: #ffffff;
+}
+
+.distance-btn:hover .triangle-up {
+    border-bottom-color: #ffffff;
+}
+
+.distance-btn:hover .triangle-down {
+    border-top-color: #ffffff;
+}
+
+.stagger-controls {
+    position: absolute;
+    right: 6px;
+    top: 50%;
+    transform: translateY(-50%);
+    width: calc(50% - 18px);
+    display: flex;
+    gap: 6px;
+    pointer-events: all;
+    padding: 0;
+}
+
+/* Delay/Duration: match original 3-button layout width */
+#delayDisplay .stagger-controls,
+#durationDisplay .stagger-controls {
+    width: calc(33.33% - 12px);
+}
+
+#delayDisplay .stagger-controls .stagger-btn,
+#durationDisplay .stagger-controls .stagger-btn {
+    width: calc(50% - 3px);
+}
+
+.stagger-input {
+    width: calc(25% - 4.5px);
+    margin: 0;
+    background-color: #1a1a1a;
+    color: #cccccc;
+    border: 1px solid rgba(255, 255, 255, 0.12);
+    box-shadow: inset 0 2px 4px rgba(0,0,0,0.3);
+    cursor: text;
+    transition: all 0.1s cubic-bezier(0.4, 0.0, 0.2, 1);
+    font-size: 11px;
+    font-weight: 500;
+    height: 26px;
+    border-radius: 4px;
+    outline: none;
+    text-align: center;
+    -webkit-appearance: none;
+    -moz-appearance: none;
+    appearance: none;
+    position: relative;
+    padding: 0;
+    box-sizing: border-box;
+}
+
+.stagger-input:hover {
+    background-color: #222222;
+    color: #ffffff;
+    border-color: rgba(255, 255, 255, 0.12);
+    box-shadow: inset 0 2px 4px rgba(0,0,0,0.4);
+}
+
+.stagger-input:focus {
+    background-color: #222222;
+    color: #ffffff;
+    border-color: #4a90e2;
+    box-shadow: inset 0 2px 4px rgba(0,0,0,0.4), 0 0 0 1px rgba(74, 144, 226, 0.3);
+}
+
+/* Hide number input arrows */
+.stagger-input::-webkit-outer-spin-button,
+.stagger-input::-webkit-inner-spin-button {
+    -webkit-appearance: none;
+    margin: 0;
+}
+
+.stagger-input[type=number] {
+    -moz-appearance: textfield;
+}
+
+.stagger-btn {
+    width: calc(25% - 4.5px);
+    margin: 0;
+    background-color: #2f2f2f;
+    color: #cccccc;
+    border: 1px solid rgba(255, 255, 255, 0.12);
+    box-shadow: 0 3px 6px rgba(0,0,0,0.15);
+    cursor: pointer;
+    transition: all 0.1s cubic-bezier(0.4, 0.0, 0.2, 1);
+    font-size: 16px;
+    font-weight: 500;
+    height: 26px;
+    border-radius: 4px;
+    outline: none;
+    box-sizing: border-box;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding-top: 2px;
+}
+
+.stagger-btn:hover {
+    background-color: #3c3c3c;
+    color: #ffffff;
+    box-shadow: 0 4px 8px rgba(0,0,0,0.4);
+}
+
+.stagger-btn:active {
+    transform: scale(0.96);
+}
+
+/* In/Out radio-style selection states */
+.keyframe-display .distance-controls .in-out-btn.selected {
+    background-color: rgba(58, 58, 58, 1);
+    color: #ffffff;
+    border-color: rgba(255, 255, 255, 0.32);
+    opacity: 1;
+}
+
+.keyframe-display .distance-controls .in-out-btn:not(.selected) {
+    background-color: #2f2f2f;
+    border-color: rgba(255, 255, 255, 0.08);
+    opacity: 1;
+}
+
+.keyframe-display .distance-controls .in-out-btn.selected:hover {
+    background-color: rgba(72, 72, 72, 1);
+}
+
+/* Position row visibility */
+.position-row {
+    display: none;
+}
+
+.position-row.visible {
+    display: flex;
+}
+
+/* Remove bottom margin from last visible row in section */
+.position-row.visible:last-child {
+    margin-bottom: 0;
+}
+
+/* Custom scrollbar styling */
+::-webkit-scrollbar {
+    width: 8px;
+}
+
+::-webkit-scrollbar-track {
+    background: #262626;
+}
+
+::-webkit-scrollbar-thumb {
+    background: #3a3a3a;
+    border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+    background: #4a4a4a;
+}
