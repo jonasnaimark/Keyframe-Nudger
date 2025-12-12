@@ -91,10 +91,12 @@ window.addDebugPanel = () => {
         originalLog(...args);
         const message = args.join(' ');
 
-        // Only show IN/OUT TRACK and IN/OUT UPDATE debug messages
+        // Only show IN/OUT TRACK, IN/OUT UPDATE, PASTE, and CLIPBOARD debug messages
         const debugKeywords = [
             'IN/OUT TRACK:',
-            'IN/OUT UPDATE:'
+            'IN/OUT UPDATE:',
+            'PASTE:',
+            'CLIPBOARD:'
         ];
 
         const isInOutDebug = debugKeywords.some(keyword => message.includes(keyword));
@@ -107,6 +109,8 @@ window.addDebugPanel = () => {
                 if (message.includes('IN/OUT TRACK:')) color = '#e74c3c';  // Red for tracking
                 if (message.includes('IN/OUT UPDATE:')) color = '#2ecc71'; // Green for updates
                 if (message.includes('Setting')) color = '#f39c12';  // Orange for actual updates
+                if (message.includes('PASTE:')) color = '#3498db';  // Blue for paste
+                if (message.includes('CLIPBOARD:')) color = '#9b59b6';  // Purple for clipboard
 
                 logDiv.innerHTML += `<div style="
                     margin: 1px 0;
@@ -205,10 +209,11 @@ document.addEventListener('DOMContentLoaded', function() {
     var readKeyframesButton = document.getElementById('readKeyframes');
 
     // Global tooltip creation function
-    function createTooltip(element, text) {
+    function createTooltip(element, text, position) {
         var tooltip = null;
         var showTimeout = null;
         var isShowing = false;
+        var showBelow = (position === 'below');
 
         function removeTooltip() {
             if (showTimeout) {
@@ -255,7 +260,11 @@ document.addEventListener('DOMContentLoaded', function() {
                 document.body.appendChild(tooltip);
                 var rect = element.getBoundingClientRect();
                 tooltip.style.left = (rect.left + rect.width / 2 - tooltip.offsetWidth / 2) + 'px';
-                tooltip.style.top = (rect.top - tooltip.offsetHeight - 8) + 'px';
+                if (showBelow) {
+                    tooltip.style.top = (rect.bottom + 8) + 'px';
+                } else {
+                    tooltip.style.top = (rect.top - tooltip.offsetHeight - 8) + 'px';
+                }
                 isShowing = true;
                 setTimeout(function() {
                     if (tooltip) tooltip.style.opacity = '1';
@@ -272,26 +281,26 @@ document.addEventListener('DOMContentLoaded', function() {
         });
     }
 
-    // Setup tooltips
-    if (readKeyframesButton) createTooltip(readKeyframesButton, 'Read keyframes');
-    if (staggerActionBtn) createTooltip(staggerActionBtn, 'Stagger direction');
-    if (snapToPlayheadBtn) createTooltip(snapToPlayheadBtn, 'Snap to playhead\nShift: Keep delays');
-    if (mirrorKeysBtn) createTooltip(mirrorKeysBtn, 'Mirror keys');
-    if (globalFrameInputField) createTooltip(globalFrameInputField, 'Frames');
+    // Setup tooltips - top row buttons show tooltips below to avoid cropping
+    if (readKeyframesButton) createTooltip(readKeyframesButton, 'Read keyframes', 'below');
+    if (staggerActionBtn) createTooltip(staggerActionBtn, 'Stagger direction', 'below');
+    if (snapToPlayheadBtn) createTooltip(snapToPlayheadBtn, 'Snap to playhead\nShift: Keep delays', 'below');
+    if (mirrorKeysBtn) createTooltip(mirrorKeysBtn, 'Mirror keys', 'below');
+    if (globalFrameInputField) createTooltip(globalFrameInputField, 'Frames', 'below');
     if (delayDecrementBtn) createTooltip(delayDecrementBtn, 'Shift: Ignore precomps');
     if (delayIncrementBtn) createTooltip(delayIncrementBtn, 'Shift: Ignore precomps');
 
-    // Second row button tooltips
+    // Second row button tooltips - also show below
     var trimInBtn = document.getElementById('trimInBtn');
     var trimOutBtn = document.getElementById('trimOutBtn');
     var trimInOutBtn = document.getElementById('trimInOutBtn');
     var copyKeysBtn = document.getElementById('copyKeysBtn');
     var pasteKeysBtn = document.getElementById('pasteKeysBtn');
-    if (trimInBtn) createTooltip(trimInBtn, 'Trim in point');
-    if (trimOutBtn) createTooltip(trimOutBtn, 'Trim out point');
-    if (trimInOutBtn) createTooltip(trimInOutBtn, 'Trim in-out point');
-    if (copyKeysBtn) createTooltip(copyKeysBtn, 'Copy keys');
-    if (pasteKeysBtn) createTooltip(pasteKeysBtn, 'Paste keys');
+    if (trimInBtn) createTooltip(trimInBtn, 'Trim in point', 'below');
+    if (trimOutBtn) createTooltip(trimOutBtn, 'Trim out point', 'below');
+    if (trimInOutBtn) createTooltip(trimInOutBtn, 'Trim in-out point', 'below');
+    if (copyKeysBtn) createTooltip(copyKeysBtn, 'Copy keys', 'below');
+    if (pasteKeysBtn) createTooltip(pasteKeysBtn, 'Paste keys', 'below');
 
     // In/Out button tooltips
     var xInBtn = document.getElementById('xInBtn');
@@ -724,8 +733,61 @@ document.addEventListener('DOMContentLoaded', function() {
             if (!csInterface) return;
             csInterface.evalScript('copySelectedKeyframes()', function(result) {
                 console.log('Copy keys result:', result);
+                // Log debug messages
+                if (result && result.indexOf('|') !== -1) {
+                    var parts = result.split('|');
+                    if (parts.length > 2) {
+                        for (var i = 2; i < parts.length; i++) {
+                            if (parts[i]) {
+                                console.log(parts[i]);
+                            }
+                        }
+                    }
+                }
+
+                // Show "Copied!" tooltip if successful
+                if (result && result.indexOf('success') === 0) {
+                    showCopyTooltip(copyKeysBtn);
+                }
             });
         });
+    }
+
+    // Show "Copied!" tooltip
+    function showCopyTooltip(button) {
+        var tooltip = document.createElement('div');
+        tooltip.textContent = 'Copied!';
+        tooltip.style.cssText = `
+            position: fixed;
+            background: rgba(30, 80, 50, 0.95);
+            color: white;
+            padding: 4px 8px;
+            border-radius: 3px;
+            font-size: 10px;
+            font-weight: 400;
+            pointer-events: none;
+            z-index: 10000;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.5);
+        `;
+
+        // Position below the button
+        var rect = button.getBoundingClientRect();
+        tooltip.style.left = (rect.left + rect.width / 2) + 'px';
+        tooltip.style.top = (rect.bottom + 5) + 'px';
+        tooltip.style.transform = 'translateX(-50%)';
+
+        document.body.appendChild(tooltip);
+
+        // Fade out and remove
+        setTimeout(function() {
+            tooltip.style.transition = 'opacity 0.3s';
+            tooltip.style.opacity = '0';
+            setTimeout(function() {
+                if (tooltip.parentNode) {
+                    tooltip.parentNode.removeChild(tooltip);
+                }
+            }, 300);
+        }, 1000);
     }
 
     // Paste Keys
@@ -734,6 +796,17 @@ document.addEventListener('DOMContentLoaded', function() {
             if (!csInterface) return;
             csInterface.evalScript('pasteKeyframes()', function(result) {
                 console.log('Paste keys result:', result);
+                // Log debug messages
+                if (result && result.indexOf('|') !== -1) {
+                    var parts = result.split('|');
+                    if (parts.length > 2) {
+                        for (var i = 2; i < parts.length; i++) {
+                            if (parts[i]) {
+                                console.log(parts[i]);
+                            }
+                        }
+                    }
+                }
             });
         });
     }

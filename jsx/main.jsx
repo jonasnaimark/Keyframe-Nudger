@@ -20225,18 +20225,29 @@ var KEYFRAME_CLIPBOARD = null;
 function getPropertyMatchPath(prop) {
     var pathParts = [];
     var current = prop;
-    
+
     while (current) {
         if (current.matchName && current.propertyType !== undefined) {
-            // Don't include layer-level properties
-            if (current.matchName.indexOf("ADBE Layer") === -1 && 
-                current.matchName.indexOf("ADBE Root") === -1) {
-                pathParts.unshift(current.matchName);
+            // Don't include layer-level match names (these vary by layer type)
+            var mn = current.matchName;
+            var isLayerLevel = (
+                mn.indexOf("ADBE Layer") !== -1 ||      // "ADBE Layer Styles", etc.
+                mn.indexOf("ADBE Root") !== -1 ||       // "ADBE Root Vectors Group"
+                mn === "ADBE Vector Layer" ||           // Shape layer type
+                mn === "ADBE AV Layer" ||               // AV layer type
+                mn === "ADBE Text Layer" ||             // Text layer type
+                mn === "ADBE Camera Layer" ||           // Camera layer type
+                mn === "ADBE Light Layer" ||            // Light layer type
+                mn === "ADBE Solid" ||                  // Solid layer type
+                mn === "ADBE Null"                      // Null layer type
+            );
+            if (!isLayerLevel) {
+                pathParts.unshift(mn);
             }
         }
         current = current.parentProperty;
     }
-    
+
     return pathParts.join("|");
 }
 
@@ -20246,15 +20257,37 @@ function getPropertyMatchPath(prop) {
  */
 function findPropertyByMatchPath(layer, targetPathStr) {
     if (!targetPathStr) return null;
-    
+
     var targetPath = targetPathStr.split("|");
-    
+
+    // Filter out any layer-level match names that might be in the path
+    var filteredPath = [];
+    for (var i = 0; i < targetPath.length; i++) {
+        var mn = targetPath[i];
+        var isLayerLevel = (
+            mn.indexOf("ADBE Layer") !== -1 ||
+            mn.indexOf("ADBE Root") !== -1 ||
+            mn === "ADBE Vector Layer" ||
+            mn === "ADBE AV Layer" ||
+            mn === "ADBE Text Layer" ||
+            mn === "ADBE Camera Layer" ||
+            mn === "ADBE Light Layer" ||
+            mn === "ADBE Solid" ||
+            mn === "ADBE Null"
+        );
+        if (!isLayerLevel) {
+            filteredPath.push(mn);
+        }
+    }
+
+    if (filteredPath.length === 0) return null;
+
     function findRecursive(propGroup, pathIndex) {
-        if (pathIndex >= targetPath.length) {
+        if (pathIndex >= filteredPath.length) {
             return null;
         }
-        
-        var targetMatchName = targetPath[pathIndex];
+
+        var targetMatchName = filteredPath[pathIndex];
         
         for (var i = 1; i <= propGroup.numProperties; i++) {
             var prop;
@@ -20266,10 +20299,10 @@ function findPropertyByMatchPath(layer, targetPathStr) {
             if (!prop) continue;
             
             if (prop.matchName === targetMatchName) {
-                if (pathIndex === targetPath.length - 1) {
+                if (pathIndex === filteredPath.length - 1) {
                     // Found the final property
                     return prop;
-                } else if (prop.propertyType === PropertyType.INDEXED_GROUP || 
+                } else if (prop.propertyType === PropertyType.INDEXED_GROUP ||
                            prop.propertyType === PropertyType.NAMED_GROUP) {
                     // Continue searching in this group
                     var found = findRecursive(prop, pathIndex + 1);
@@ -20399,7 +20432,14 @@ function copySelectedKeyframes() {
             firstKeyframeTime: firstKeyframeTime,
             sourceLayerName: layer.name
         };
-        
+
+        // DEBUG: Log what was copied
+        DEBUG_JSX.log("CLIPBOARD: Stored " + copiedProperties.length + " properties");
+        for (var p = 0; p < copiedProperties.length; p++) {
+            DEBUG_JSX.log("  - " + copiedProperties[p].name + " (" + copiedProperties[p].keyframes.length + " keys) - matchPath: " + copiedProperties[p].matchPath);
+        }
+        DEBUG_JSX.log("CLIPBOARD: Stored " + copiedMarkers.length + " markers");
+
         // Build success message
         var keyframeCount = 0;
         for (var p = 0; p < copiedProperties.length; p++) {
@@ -20413,10 +20453,12 @@ function copySelectedKeyframes() {
         }
         
         DEBUG_JSX.log(msg);
-        return "success|" + msg;
+        var debugMessages = DEBUG_JSX.getMessages();
+        return "success|" + msg + "|" + debugMessages.join("|");
     } catch(e) {
         DEBUG_JSX.log("Copy error: " + e.toString());
-        return "error|" + e.toString();
+        var debugMessages = DEBUG_JSX.getMessages();
+        return "error|" + e.toString() + "|" + debugMessages.join("|");
     }
 }
 
@@ -20454,16 +20496,25 @@ function pasteKeyframes() {
         var markersPasted = 0;
         var propertiesPasted = 0;
         var missingProperties = []; // Track which properties couldn't be found
-        
+
+        // DEBUG: Log what's in clipboard
+        DEBUG_JSX.log("PASTE: Clipboard has " + KEYFRAME_CLIPBOARD.properties.length + " properties, " + KEYFRAME_CLIPBOARD.markers.length + " markers");
+        for (var dbg = 0; dbg < KEYFRAME_CLIPBOARD.properties.length; dbg++) {
+            DEBUG_JSX.log("  - Property: " + KEYFRAME_CLIPBOARD.properties[dbg].name + " (matchPath: " + KEYFRAME_CLIPBOARD.properties[dbg].matchPath + ")");
+        }
+
         for (var layerIdx = 0; layerIdx < selectedLayers.length; layerIdx++) {
             var layer = selectedLayers[layerIdx];
-            
+            DEBUG_JSX.log("PASTE: Pasting to layer '" + layer.name + "'");
+
             // Paste each property's keyframes
             for (var p = 0; p < KEYFRAME_CLIPBOARD.properties.length; p++) {
                 var propData = KEYFRAME_CLIPBOARD.properties[p];
+                DEBUG_JSX.log("PASTE: Looking for property '" + propData.name + "' with matchPath: " + propData.matchPath);
                 var targetProp = findPropertyByMatchPath(layer, propData.matchPath);
-                
+
                 if (!targetProp) {
+                    DEBUG_JSX.log("PASTE: Property NOT FOUND - " + propData.name);
                     // Track missing property (avoid duplicates)
                     var alreadyListed = false;
                     for (var m = 0; m < missingProperties.length; m++) {
@@ -20477,7 +20528,9 @@ function pasteKeyframes() {
                     }
                     continue;
                 }
-                
+
+                DEBUG_JSX.log("PASTE: Property FOUND - pasting " + propData.keyframes.length + " keyframes to " + propData.name);
+
                 // Paste keyframes
                 var keyframes = propData.keyframes;
                 var newKeyIndices = [];
@@ -20520,7 +20573,9 @@ function pasteKeyframes() {
         }
         
         app.endUndoGroup();
-        
+
+        var debugMessages = DEBUG_JSX.getMessages();
+
         // Build result message
         var msg = "";
         if (keyframesPasted > 0) {
@@ -20531,17 +20586,18 @@ function pasteKeyframes() {
             }
             if (missingProperties.length > 0) {
                 msg += "\nMissing: " + missingProperties.join(", ");
-                return "warning|" + msg;
+                return "warning|" + msg + "|" + debugMessages.join("|");
             }
-            return "success|" + msg;
+            return "success|" + msg + "|" + debugMessages.join("|");
         } else if (missingProperties.length > 0) {
-            return "error|Could not find properties: " + missingProperties.join(", ");
+            return "error|Could not find properties: " + missingProperties.join(", ") + "|" + debugMessages.join("|");
         } else {
-            return "error|No keyframes pasted";
+            return "error|No keyframes pasted|" + debugMessages.join("|");
         }
     } catch(e) {
         app.endUndoGroup();
         DEBUG_JSX.log("Paste error: " + e.toString());
-        return "error|" + e.toString();
+        var debugMessages = DEBUG_JSX.getMessages();
+        return "error|" + e.toString() + "|" + debugMessages.join("|");
     }
 }
