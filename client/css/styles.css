@@ -98,10 +98,11 @@ body {
     box-sizing: border-box;
 }
 
-/* Wide buttons - flex: 2 (twice as wide as narrow) */
+/* Wide buttons - fixed width for alignment between rows */
 .keyframe-row-1 .wide-btn,
 .keyframe-row-2 .wide-btn {
-    flex: 2;
+    flex: 0 0 calc(30% - 1px);
+    width: calc(30% - 1px);
     min-width: 0;
     height: 35px;
     margin: 0;
@@ -119,25 +120,24 @@ body {
     padding: 0;
 }
 
-/* Ensure SVG icons are properly centered */
-.keyframe-row-1 .stagger-btn svg,
-.keyframe-row-1 .stagger-btn img,
-.keyframe-row-2 .stagger-btn svg,
-.keyframe-row-2 .stagger-btn img {
+/* Consistent icon sizing for all button icons */
+.btn-icon {
+    width: 20px;
+    height: 17px;
     display: block;
     margin: 0 auto;
     transition: transform 0.3s ease;
 }
 
 /* Stagger direction button flip animation */
-.keyframe-row-1 .stagger-btn.flipped svg,
-.keyframe-row-2 .stagger-btn.flipped svg {
+.stagger-btn.flipped .btn-icon {
     transform: scaleX(-1);
 }
 
 /* Ensure global input visually matches buttons in rows */
 .keyframe-row-1 .stagger-input,
 .keyframe-row-2 .stagger-input {
+    cursor: ns-resize;
     height: 35px !important;
     line-height: 35px;
     font-size: 12.5px;
@@ -166,9 +166,10 @@ body {
 /* Make stagger +/- match delay/duration widths */
 #staggerRow .distance-controls {
     width: calc(33.33% - 12px);
+    justify-content: flex-end;
 }
 #staggerRow .distance-controls .stagger-btn {
-    width: calc(50% - 3px);
+    width: calc(50% - 6px);
 }
 
 .control-row:last-child {
@@ -230,13 +231,14 @@ body {
     transform: translateY(-50%);
     width: calc(33.33% - 12px);
     display: flex;
+    justify-content: flex-end;
     gap: 6px;
     pointer-events: all;
     padding: 0;
 }
 
 .resolution-display .stagger-controls .stagger-btn {
-    width: calc(50% - 3px);
+    width: calc(50% - 6px);
 }
 
 /* Distance controls - 4 buttons for In/Out/−/+ */
@@ -355,11 +357,12 @@ body {
 #delayDisplay .stagger-controls,
 #durationDisplay .stagger-controls {
     width: calc(33.33% - 12px);
+    justify-content: flex-end;
 }
 
 #delayDisplay .stagger-controls .stagger-btn,
 #durationDisplay .stagger-controls .stagger-btn {
-    width: calc(50% - 3px);
+    width: calc(50% - 6px);
 }
 
 .stagger-input {

@@ -12510,6 +12510,10 @@ function snapToPlayheadFromPanel(preserveDelays) {
             if (hasSelectedKeyframes) break;
         }
 
+        // Track layer in/out points BEFORE snapping
+        var layerInOutData = trackLayerInOutPoints(selectedLayers);
+        var allKeyframeDataSnap = []; // For layer in/out point tracking
+
         // If no keyframes selected, snap layers instead
         if (!hasSelectedKeyframes) {
             DEBUG_JSX.log("No keyframes selected - snapping layers to playhead instead");
@@ -12823,6 +12827,12 @@ function snapToPlayheadFromPanel(preserveDelays) {
                 for (var k = 0; k < keyframesToMove.length; k++) {
                     var data = keyframesToMove[k];
                     prop.setValueAtTime(data.newTime, data.value);
+
+                    // Collect for layer in/out point tracking
+                    allKeyframeDataSnap.push({
+                        layer: layer,
+                        newTime: data.newTime
+                    });
                 }
 
                 // Then remove old keyframes (carefully)
@@ -12917,6 +12927,12 @@ function snapToPlayheadFromPanel(preserveDelays) {
                     var data = keyframesToMove[k];
                     var newIdx = prop.addKey(data.newTime);
                     prop.setValueAtKey(newIdx, data.value);
+
+                    // Collect for layer in/out point tracking
+                    allKeyframeDataSnap.push({
+                        layer: layer,
+                        newTime: data.newTime
+                    });
 
                     // Apply temporal ease first to avoid flipping linear sides
                     if (data.inEase !== undefined && data.outEase !== undefined) {
@@ -13155,6 +13171,9 @@ function snapToPlayheadFromPanel(preserveDelays) {
             // Non-fatal selection restoration error
             $.writeln("Selection backup restoration failed: " + selectionBackupError.toString());
         }
+
+        // Update layer in/out points to match snapped keyframes (BEFORE ending undo group)
+        updateLayerInOutPoints(layerInOutData, allKeyframeDataSnap);
 
         app.endUndoGroup();
 
@@ -19709,11 +19728,13 @@ function moveSelectedKeysToLayerInPoint(layers, comp) {
     var markersMoved = 0;
     var processedSelections = []; // Store selections for final restoration pass
 
-    // Process each layer separately
+    // PHASE 1: Collect all keyframe data from all layers BEFORE making any modifications
+    var layerDataCollection = [];
+
     for (var layerIdx = 0; layerIdx < layers.length; layerIdx++) {
         var layer = layers[layerIdx];
         var targetTime = layer.inPoint;
-        
+
         // Collect all selected keyframe data for this layer
         var allSelectedKeyData = []; // {prop, keyIndex, time, keyData}
         var selectedProps = layer.selectedProperties;
@@ -19757,6 +19778,21 @@ function moveSelectedKeysToLayerInPoint(layers, comp) {
         }
 
         if (allSelectedKeyData.length === 0) continue;
+
+        // Store this layer's data for processing in phase 2
+        layerDataCollection.push({
+            layer: layer,
+            targetTime: targetTime,
+            allSelectedKeyData: allSelectedKeyData
+        });
+    }
+
+    // PHASE 2: Now process all collected data
+    for (var layerIdx = 0; layerIdx < layerDataCollection.length; layerIdx++) {
+        var layerData = layerDataCollection[layerIdx];
+        var layer = layerData.layer;
+        var targetTime = layerData.targetTime;
+        var allSelectedKeyData = layerData.allSelectedKeyData;
 
         // Find the earliest selected keyframe time (across all properties)
         var earliestTime = allSelectedKeyData[0].time;
@@ -19973,11 +20009,13 @@ function moveSelectedKeysToLayerOutPoint(layers, comp) {
     var markersMoved = 0;
     var processedSelections = []; // Store selections for final restoration pass
 
-    // Process each layer separately
+    // PHASE 1: Collect all keyframe data from all layers BEFORE making any modifications
+    var layerDataCollection = [];
+
     for (var layerIdx = 0; layerIdx < layers.length; layerIdx++) {
         var layer = layers[layerIdx];
         var targetTime = layer.outPoint;
-        
+
         // Collect all selected keyframe data for this layer
         var allSelectedKeyData = []; // {prop, keyIndex, time, keyData}
         var selectedProps = layer.selectedProperties;
@@ -20021,6 +20059,21 @@ function moveSelectedKeysToLayerOutPoint(layers, comp) {
         }
 
         if (allSelectedKeyData.length === 0) continue;
+
+        // Store this layer's data for processing in phase 2
+        layerDataCollection.push({
+            layer: layer,
+            targetTime: targetTime,
+            allSelectedKeyData: allSelectedKeyData
+        });
+    }
+
+    // PHASE 2: Now process all collected data
+    for (var layerIdx = 0; layerIdx < layerDataCollection.length; layerIdx++) {
+        var layerData = layerDataCollection[layerIdx];
+        var layer = layerData.layer;
+        var targetTime = layerData.targetTime;
+        var allSelectedKeyData = layerData.allSelectedKeyData;
 
         // Find the latest selected keyframe time (across all properties)
         var latestTime = allSelectedKeyData[0].time;

@@ -208,6 +208,56 @@ document.addEventListener('DOMContentLoaded', function() {
     var mirrorKeysBtn = document.getElementById('mirrorKeysBtn');
     var readKeyframesButton = document.getElementById('readKeyframes');
 
+    // Add drag-to-scrub functionality to frame input
+    if (globalFrameInputField) {
+        var isDragging = false;
+        var hasDragged = false;
+        var startY = 0;
+        var startValue = 0;
+        var dragSensitivity = 2; // How many pixels per 1 unit change
+        var dragThreshold = 3; // Pixels before drag starts
+
+        globalFrameInputField.addEventListener('mousedown', function(e) {
+            isDragging = true;
+            hasDragged = false;
+            startY = e.clientY;
+            startValue = parseInt(globalFrameInputField.value) || 0;
+        });
+
+        document.addEventListener('mousemove', function(e) {
+            if (!isDragging) return;
+
+            var deltaY = startY - e.clientY; // Inverted: drag up = increase
+
+            // Only start scrubbing after threshold
+            if (!hasDragged && Math.abs(deltaY) > dragThreshold) {
+                hasDragged = true;
+                globalFrameInputField.blur(); // Remove focus once dragging starts
+            }
+
+            if (!hasDragged) return;
+
+            var changeAmount = Math.round(deltaY / dragSensitivity);
+            var newValue = startValue + changeAmount;
+
+            // Clamp to min only
+            var min = parseInt(globalFrameInputField.getAttribute('min')) || 1;
+            newValue = Math.max(min, newValue);
+
+            // Round to whole number
+            newValue = Math.round(newValue);
+
+            globalFrameInputField.value = newValue;
+        });
+
+        document.addEventListener('mouseup', function() {
+            if (isDragging) {
+                isDragging = false;
+                hasDragged = false;
+            }
+        });
+    }
+
     // Global tooltip creation function
     function createTooltip(element, text, position) {
         var tooltip = null;
