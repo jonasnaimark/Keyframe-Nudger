@@ -293,12 +293,10 @@ document.addEventListener('DOMContentLoaded', function() {
     // Second row button tooltips - also show below
     var trimInBtn = document.getElementById('trimInBtn');
     var trimOutBtn = document.getElementById('trimOutBtn');
-    var trimInOutBtn = document.getElementById('trimInOutBtn');
     var copyKeysBtn = document.getElementById('copyKeysBtn');
     var pasteKeysBtn = document.getElementById('pasteKeysBtn');
     if (trimInBtn) createTooltip(trimInBtn, 'Trim in point', 'below');
     if (trimOutBtn) createTooltip(trimOutBtn, 'Trim out point', 'below');
-    if (trimInOutBtn) createTooltip(trimInOutBtn, 'Trim in-out point', 'below');
     if (copyKeysBtn) createTooltip(copyKeysBtn, 'Copy keys', 'below');
     if (pasteKeysBtn) createTooltip(pasteKeysBtn, 'Paste keys', 'below');
 
@@ -713,16 +711,6 @@ document.addEventListener('DOMContentLoaded', function() {
             if (!csInterface) return;
             csInterface.evalScript('handleTrimOutPoint()', function(result) {
                 console.log('Trim out point result:', result);
-            });
-        });
-    }
-
-    // Trim In-Out Point
-    if (trimInOutBtn) {
-        trimInOutBtn.addEventListener('click', function() {
-            if (!csInterface) return;
-            csInterface.evalScript('handleTrimInOutPoint()', function(result) {
-                console.log('Trim in-out point result:', result);
             });
         });
     }

@@ -79,19 +79,38 @@ body {
     align-items: stretch;
 }
 
-/* Keyframe Nudger top row equal widths */
-.keyframe-top-row > .stagger-btn,
-.keyframe-top-row > .stagger-input {
-    flex: 0 0 calc(20% - 8px);
-    width: calc(20% - 8px);
+/* Keyframe Nudger Row 1 & Row 2 layouts */
+.keyframe-row-1,
+.keyframe-row-2 {
+    display: flex;
+    gap: 10px;
+    margin-bottom: 10px;
+    align-items: stretch;
+}
+
+/* Narrow buttons - flex: 1 */
+.keyframe-row-1 .narrow-btn,
+.keyframe-row-2 .narrow-btn {
+    flex: 1;
     min-width: 0;
     height: 35px;
     margin: 0;
     box-sizing: border-box;
 }
 
-/* Make top-row buttons match input height for visual parity */
-.keyframe-top-row .stagger-btn {
+/* Wide buttons - flex: 2 (twice as wide as narrow) */
+.keyframe-row-1 .wide-btn,
+.keyframe-row-2 .wide-btn {
+    flex: 2;
+    min-width: 0;
+    height: 35px;
+    margin: 0;
+    box-sizing: border-box;
+}
+
+/* Make row buttons match input height for visual parity */
+.keyframe-row-1 .stagger-btn,
+.keyframe-row-2 .stagger-btn {
     height: 35px;
     border-radius: 6px;
     display: flex;
@@ -101,20 +120,24 @@ body {
 }
 
 /* Ensure SVG icons are properly centered */
-.keyframe-top-row .stagger-btn svg,
-.keyframe-top-row .stagger-btn img {
+.keyframe-row-1 .stagger-btn svg,
+.keyframe-row-1 .stagger-btn img,
+.keyframe-row-2 .stagger-btn svg,
+.keyframe-row-2 .stagger-btn img {
     display: block;
     margin: 0 auto;
     transition: transform 0.3s ease;
 }
 
 /* Stagger direction button flip animation */
-.keyframe-top-row .stagger-btn.flipped svg {
+.keyframe-row-1 .stagger-btn.flipped svg,
+.keyframe-row-2 .stagger-btn.flipped svg {
     transform: scaleX(-1);
 }
 
-/* Ensure global input visually matches buttons in top row */
-.keyframe-top-row .stagger-input {
+/* Ensure global input visually matches buttons in rows */
+.keyframe-row-1 .stagger-input,
+.keyframe-row-2 .stagger-input {
     height: 35px !important;
     line-height: 35px;
     font-size: 12.5px;
@@ -128,11 +151,13 @@ body {
     text-align: center;
 }
 
-.keyframe-top-row .stagger-input:hover {
+.keyframe-row-1 .stagger-input:hover,
+.keyframe-row-2 .stagger-input:hover {
     border-color: rgba(255, 255, 255, 0.24);
 }
 
-.keyframe-top-row .stagger-input:focus {
+.keyframe-row-1 .stagger-input:focus,
+.keyframe-row-2 .stagger-input:focus {
     background-color: #1a1a1a;
     border-color: #4a90e2;
     box-shadow: 0 3px 6px rgba(0,0,0,0.15);
