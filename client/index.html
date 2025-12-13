@@ -10,10 +10,10 @@
         <!-- Keyframe Nudger Section -->
         <section class="section">
             <div class="section-content">
-                <!-- Top row: 3 narrow buttons + 1 wide Read Keyframes -->
+                <!-- Top row: 4 equal-width buttons -->
                 <div class="control-row keyframe-row-1">
                     <!-- 1. Snap keys to playhead -->
-                    <button class="stagger-btn narrow-btn" id="snapToPlayheadBtn" type="button" title="Snap to playhead&#10;Shift: Keep delays">
+                    <button class="stagger-btn" id="snapToPlayheadBtn" type="button" title="Snap to playhead&#10;Shift: Keep delays">
                         <svg class="btn-icon" viewBox="0 0 72 62" fill="none">
                             <path d="M36 31L36 58" stroke="white" stroke-width="4" stroke-linecap="round"/>
                             <path d="M46.3682 35L53.8543 42.4861L46.3682 49.9723" stroke="white" stroke-width="4" stroke-linecap="square"/>
@@ -22,7 +22,7 @@
                         </svg>
                     </button>
                     <!-- 2. Mirror keys -->
-                    <button class="stagger-btn narrow-btn" id="mirrorKeysBtn" type="button" title="Mirror keys">
+                    <button class="stagger-btn" id="mirrorKeysBtn" type="button" title="Mirror keys">
                         <svg class="btn-icon" viewBox="0 0 72 62" fill="none">
                             <path d="M36 7L36 55" stroke="white" stroke-width="4" stroke-linecap="round"/>
                             <rect x="59" y="21.1716" width="14" height="14" transform="rotate(45 59 21.1716)" stroke="white" stroke-width="4"/>
@@ -30,39 +30,39 @@
                         </svg>
                     </button>
                     <!-- 3. Stagger direction -->
-                    <button class="stagger-btn narrow-btn" id="staggerActionBtn" type="button" title="Stagger direction">
+                    <button class="stagger-btn" id="staggerActionBtn" type="button" title="Stagger direction">
                         <svg class="btn-icon" viewBox="0 0 72 62" fill="none">
                             <path d="M48 31L24 31" stroke="white" stroke-width="4" stroke-linecap="round"/>
                             <path d="M32 48L8 48" stroke="white" stroke-width="4" stroke-linecap="round"/>
                             <path d="M64 14L40 14" stroke="white" stroke-width="4" stroke-linecap="round"/>
                         </svg>
                     </button>
-                    <!-- 4. Read Keyframes (wide) -->
-                    <button id="readKeyframes" class="stagger-btn wide-btn" title="Read Keyframes">
+                    <!-- 4. Read Keyframes -->
+                    <button id="readKeyframes" class="stagger-btn" title="Read Keyframes">
                         <svg class="btn-icon" viewBox="0 0 72 62" fill="none">
                             <rect x="11.9614" y="6" width="37.4913" height="37.4913" rx="18.7456" stroke="white" stroke-width="4"/>
                             <line x1="44.0446" y1="37.3807" x2="64.2504" y2="57.5866" stroke="white" stroke-width="4"/>
                         </svg>
                     </button>
                 </div>
-                <!-- Second row: 4 narrow buttons + 1 wide frame input -->
+                <!-- Second row: 4 equal-width buttons -->
                 <div class="control-row keyframe-row-2">
                     <!-- 1. Trim in-point -->
-                    <button id="trimInBtn" class="stagger-btn narrow-btn" type="button" title="Trim in-point&#10;Shift: Min in-point">
+                    <button id="trimInBtn" class="stagger-btn" type="button" title="Trim in-point&#10;Shift: Min in-point">
                         <svg class="btn-icon" viewBox="0 0 72 62" fill="none">
                             <path d="M60.0046 13L12.0046 13" stroke="white" stroke-width="4" stroke-linecap="round"/>
                             <rect x="15.9998" y="31.1774" width="14" height="14" transform="rotate(45 15.9998 31.1774)" stroke="white" stroke-width="4"/>
                         </svg>
                     </button>
                     <!-- 2. Trim out-point -->
-                    <button id="trimOutBtn" class="stagger-btn narrow-btn" type="button" title="Trim out-point&#10;Shift: Max out-point">
+                    <button id="trimOutBtn" class="stagger-btn" type="button" title="Trim out-point&#10;Shift: Max out-point">
                         <svg class="btn-icon" viewBox="0 0 72 62" fill="none">
                             <path d="M60.0049 13L12.0049 13" stroke="white" stroke-width="4" stroke-linecap="round"/>
                             <rect x="56" y="31.1774" width="14" height="14" transform="rotate(45 56 31.1774)" stroke="white" stroke-width="4"/>
                         </svg>
                     </button>
                     <!-- 3. Copy keys -->
-                    <button id="copyKeysBtn" class="stagger-btn narrow-btn" type="button" title="Copy keys">
+                    <button id="copyKeysBtn" class="stagger-btn" type="button" title="Copy keys">
                         <svg class="btn-icon" viewBox="0 0 72 62" fill="none">
                             <path d="M55 13C57.2091 13 59 14.7909 59 17V53C59 55.2091 57.2091 57 55 57H28C25.7909 57 24 55.2091 24 53H55V13Z" fill="white"/>
                             <rect x="12" y="7" width="37" height="40" stroke="white" stroke-width="4" stroke-linejoin="round"/>
@@ -71,7 +71,7 @@
                         </svg>
                     </button>
                     <!-- 4. Paste keys -->
-                    <button id="pasteKeysBtn" class="stagger-btn narrow-btn" type="button" title="Paste keys">
+                    <button id="pasteKeysBtn" class="stagger-btn" type="button" title="Paste keys">
                         <svg class="btn-icon" viewBox="0 0 72 62" fill="none">
                             <path d="M55 13C57.2091 13 59 14.7909 59 17V53C59 55.2091 57.2091 57 55 57H28C25.7909 57 24 55.2091 24 53H55V13Z" fill="white"/>
                             <rect x="12" y="7" width="37" height="40" stroke="white" stroke-width="4" stroke-linejoin="round"/>
@@ -79,37 +79,44 @@
                             <path d="M30.4727 17.4453L30.4727 32.4453" stroke="white" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/>
                         </svg>
                     </button>
-                    <!-- 5. Global frame number input (wide) -->
-                    <input class="stagger-input wide-btn" id="globalFrameInput" type="number" value="3" min="1" step="1" data-tooltip="Frames">
                 </div>
-                <div class="control-row">
+                <!-- Frame multiplier row -->
+                <div class="control-row compact-row">
+                    <div class="resolution-display" id="frameMultiplierDisplay">
+                        <span id="frameMultiplierText">Frame multiplier</span>
+                        <div class="stagger-controls">
+                            <input class="stagger-input" id="globalFrameInput" type="number" value="3" min="1" step="1" data-tooltip="Frames">
+                        </div>
+                    </div>
+                </div>
+                <div class="control-row compact-row">
                     <div class="resolution-display" id="delayDisplay">
-                        <span id="delayText" style="opacity: 0.75;">Delay</span>
+                        <span id="delayText">Delay</span>
                         <div class="stagger-controls">
                             <button class="stagger-btn decrement" id="delayDecrementBtn" type="button" title="Decrease delay&#10;Shift: Ignore precomps">−</button>
                             <button class="stagger-btn increment" id="delayIncrementBtn" type="button" title="Increase delay&#10;Shift: Ignore precomps">+</button>
                         </div>
                     </div>
                 </div>
-                <div class="control-row">
+                <div class="control-row compact-row">
                     <div class="resolution-display" id="durationDisplay">
-                        <span id="durationText" style="opacity: 0.75;">Duration</span>
+                        <span id="durationText">Duration</span>
                         <div class="stagger-controls">
                             <button class="stagger-btn decrement" id="durationDecrementBtn" type="button">−</button>
                             <button class="stagger-btn increment" id="durationIncrementBtn" type="button">+</button>
                         </div>
                     </div>
                 </div>
-                <div class="control-row" id="staggerRow">
-                    <div class="keyframe-display" id="staggerDisplay">
+                <div class="control-row compact-row">
+                    <div class="resolution-display" id="staggerDisplay">
                         <span id="staggerText">Stagger</span>
-                        <div class="distance-controls">
+                        <div class="stagger-controls">
                             <button class="stagger-btn decrement" id="staggerDecrementBtn" type="button">−</button>
                             <button class="stagger-btn increment" id="staggerIncrementBtn" type="button">+</button>
                         </div>
                     </div>
                 </div>
-                <div class="control-row position-row" id="xDistanceRow">
+                <div class="control-row compact-row position-row" id="xDistanceRow">
                     <div class="keyframe-display" id="xDistanceDisplay">
                         <span id="xDistanceText">X distance</span>
                         <div class="distance-controls">
@@ -120,7 +127,7 @@
                         </div>
                     </div>
                 </div>
-                <div class="control-row position-row" id="yDistanceRow">
+                <div class="control-row compact-row position-row" id="yDistanceRow">
                     <div class="keyframe-display" id="yDistanceDisplay">
                         <span id="yDistanceText">Y distance</span>
                         <div class="distance-controls">

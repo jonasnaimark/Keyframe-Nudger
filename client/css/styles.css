@@ -70,21 +70,13 @@ body {
 }
 
 /* All buttons equal width */
-.keyframe-row-1 .narrow-btn,
-.keyframe-row-2 .narrow-btn,
-.keyframe-row-1 .wide-btn,
-.keyframe-row-2 .wide-btn {
+.keyframe-row-1 .stagger-btn,
+.keyframe-row-2 .stagger-btn {
     flex: 1;
     min-width: 0;
     height: 35px;
     margin: 0;
     box-sizing: border-box;
-}
-
-/* Make row buttons match input height for visual parity */
-.keyframe-row-1 .stagger-btn,
-.keyframe-row-2 .stagger-btn {
-    height: 35px;
     border-radius: 6px;
     display: flex;
     align-items: center;
@@ -106,42 +98,42 @@ body {
     transform: scaleX(-1);
 }
 
-/* Ensure global input visually matches buttons in rows */
-.keyframe-row-1 .stagger-input,
-.keyframe-row-2 .stagger-input {
-    cursor: ns-resize;
-    height: 35px !important;
-    line-height: 35px;
-    font-size: 12.5px;
-    padding: 2px 0 0 0;
-    box-sizing: border-box;
-    vertical-align: middle;
-    border-radius: 6px;
-    box-shadow: 0 3px 6px rgba(0,0,0,0.15);
-    background-color: #1a1a1a;
-    border: 1px solid rgba(255, 255, 255, 0.16);
-    text-align: center;
+/* Frame multiplier row styling */
+#frameMultiplierDisplay {
+    background-color: #222222;
+    border: 1px solid rgba(255, 255, 255, 0.08);
 }
 
-.keyframe-row-1 .stagger-input:hover,
-.keyframe-row-2 .stagger-input:hover {
-    border-color: rgba(255, 255, 255, 0.24);
-}
-
-.keyframe-row-1 .stagger-input:focus,
-.keyframe-row-2 .stagger-input:focus {
-    background-color: #1a1a1a;
-    border-color: #4a90e2;
-    box-shadow: 0 3px 6px rgba(0,0,0,0.15);
-}
-
-/* Make stagger +/- match delay/duration widths */
-#staggerRow .distance-controls {
-    width: calc(33.33% - 12px);
+#frameMultiplierDisplay .stagger-controls {
+    width: calc(33.33% - 4px);
     justify-content: flex-end;
+    right: 0;
+    top: 0;
+    transform: none;
+    height: 100%;
 }
-#staggerRow .distance-controls .stagger-btn {
-    width: calc(50% - 6px);
+
+#frameMultiplierDisplay .stagger-controls .stagger-input {
+    width: 100%;
+    height: 100%;
+    font-size: 11px;
+    padding: 0;
+    box-sizing: border-box;
+    border-radius: 6px;
+    background-color: #1a1a1a;
+    border: 1px solid rgba(255, 255, 255, 0.12);
+    text-align: center;
+    cursor: ns-resize;
+}
+
+#frameMultiplierDisplay .stagger-controls .stagger-input:hover {
+    border-color: rgba(255, 255, 255, 0.24);
+    background-color: #222222;
+}
+
+#frameMultiplierDisplay .stagger-controls .stagger-input:focus {
+    background-color: #222222;
+    border-color: #4a90e2;
 }
 
 .control-row:last-child {
@@ -171,12 +163,14 @@ body {
     white-space: nowrap;
 }
 
-/* Keyframe Reader labels with reduced opacity */
+/* Control row labels with reduced opacity */
+#frameMultiplierText,
+#delayText,
 #durationText,
 #staggerText,
 #xDistanceText,
 #yDistanceText {
-    opacity: 0.75;
+    opacity: 0.9;
 }
 
 /* Keyframe display - styled like resolution display but without buttons */
@@ -201,7 +195,7 @@ body {
     right: 6px;
     top: 50%;
     transform: translateY(-50%);
-    width: calc(33.33% - 12px);
+    width: calc(33.33% - 4px);
     display: flex;
     justify-content: flex-end;
     gap: 6px;
@@ -219,9 +213,10 @@ body {
     right: 6px;
     top: 50%;
     transform: translateY(-50%);
-    width: calc(50% - 18px);
+    width: calc(50% - 12px);
     display: flex;
-    gap: 6px;
+    justify-content: flex-end;
+    gap: 4px;
     pointer-events: all;
     padding: 0;
 }
@@ -325,16 +320,23 @@ body {
     padding: 0;
 }
 
-/* Delay/Duration: match original 3-button layout width */
+/* Delay/Duration/Stagger: wider controls to match AirBoard */
 #delayDisplay .stagger-controls,
-#durationDisplay .stagger-controls {
-    width: calc(33.33% - 12px);
+#durationDisplay .stagger-controls,
+#staggerDisplay .stagger-controls {
+    width: calc(33.33% - 4px);
     justify-content: flex-end;
 }
 
 #delayDisplay .stagger-controls .stagger-btn,
-#durationDisplay .stagger-controls .stagger-btn {
+#durationDisplay .stagger-controls .stagger-btn,
+#staggerDisplay .stagger-controls .stagger-btn {
     width: calc(50% - 6px);
+}
+
+/* Reduced gaps between control rows */
+.compact-row {
+    margin-bottom: 4px !important;
 }
 
 .stagger-input {
