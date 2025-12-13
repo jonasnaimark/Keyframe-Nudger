@@ -345,8 +345,8 @@ document.addEventListener('DOMContentLoaded', function() {
     var trimOutBtn = document.getElementById('trimOutBtn');
     var copyKeysBtn = document.getElementById('copyKeysBtn');
     var pasteKeysBtn = document.getElementById('pasteKeysBtn');
-    if (trimInBtn) createTooltip(trimInBtn, 'Trim in point', 'below');
-    if (trimOutBtn) createTooltip(trimOutBtn, 'Trim out point', 'below');
+    if (trimInBtn) createTooltip(trimInBtn, 'Trim in-point\nShift: Min in-point', 'below');
+    if (trimOutBtn) createTooltip(trimOutBtn, 'Trim out-point\nShift: Max out-point', 'below');
     if (copyKeysBtn) createTooltip(copyKeysBtn, 'Copy keys', 'below');
     if (pasteKeysBtn) createTooltip(pasteKeysBtn, 'Paste keys', 'below');
 
@@ -747,9 +747,11 @@ document.addEventListener('DOMContentLoaded', function() {
 
     // Trim In Point
     if (trimInBtn) {
-        trimInBtn.addEventListener('click', function() {
+        trimInBtn.addEventListener('click', function(event) {
+            var isShiftHeld = event.shiftKey;
+            console.log('Trim In Point clicked' + (isShiftHeld ? ' [SHIFT - Min In-Point]' : ''));
             if (!csInterface) return;
-            csInterface.evalScript('handleTrimInPoint()', function(result) {
+            csInterface.evalScript('handleTrimInPoint(' + isShiftHeld + ')', function(result) {
                 console.log('Trim in point result:', result);
             });
         });
@@ -757,9 +759,11 @@ document.addEventListener('DOMContentLoaded', function() {
 
     // Trim Out Point
     if (trimOutBtn) {
-        trimOutBtn.addEventListener('click', function() {
+        trimOutBtn.addEventListener('click', function(event) {
+            var isShiftHeld = event.shiftKey;
+            console.log('Trim Out Point clicked' + (isShiftHeld ? ' [SHIFT - Max Out-Point]' : ''));
             if (!csInterface) return;
-            csInterface.evalScript('handleTrimOutPoint()', function(result) {
+            csInterface.evalScript('handleTrimOutPoint(' + isShiftHeld + ')', function(result) {
                 console.log('Trim out point result:', result);
             });
         });

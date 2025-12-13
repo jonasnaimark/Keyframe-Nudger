@@ -19387,31 +19387,50 @@ function mirrorKeysFromPanel(preserveDelays) {
  * If keyframes selected: Move selected keyframes so first keyframe lands on layer's in point
  * If no keyframes selected: Trim each layer's in point to its first keyframe
  */
-function handleTrimInPoint() {
+function handleTrimInPoint(setToMin) {
     try {
         DEBUG_JSX.clear();
-        DEBUG_JSX.log("handleTrimInPoint called");
+        DEBUG_JSX.log("handleTrimInPoint called" + (setToMin ? " [SHIFT - Min In-Point]" : ""));
         app.beginUndoGroup("Trim In Point");
-        
+
         var comp = app.project.activeItem;
         if (!comp || !(comp instanceof CompItem)) {
             app.endUndoGroup();
             return "error|No active composition";
         }
-        
+
         var selectedLayers = [];
         for (var i = 0; i < comp.selectedLayers.length; i++) {
             selectedLayers.push(comp.selectedLayers[i]);
         }
-        
+
         if (selectedLayers.length === 0) {
             app.endUndoGroup();
             return "error|No layers selected";
         }
-        
+
+        // Shift mode: Extend all selected layers' in-point to 0 (comp start), keeping out-point fixed
+        if (setToMin) {
+            var layersAdjusted = 0;
+            for (var i = 0; i < selectedLayers.length; i++) {
+                try {
+                    var layer = selectedLayers[i];
+                    var originalOutPoint = layer.outPoint;
+                    layer.inPoint = 0;
+                    layer.outPoint = originalOutPoint; // Restore out-point to keep it pinned
+                    layersAdjusted++;
+                } catch(e) {
+                    // Some layers (like locked precomps) may not be adjustable
+                    $.writeln("Could not set min in-point for layer: " + selectedLayers[i].name + " - " + e.toString());
+                }
+            }
+            app.endUndoGroup();
+            return "success|Extended " + layersAdjusted + " layer(s) in-point to comp start";
+        }
+
         // Check if there are selected keyframes
         var hasSelectedKeyframes = checkForSelectedKeyframes(selectedLayers);
-        
+
         if (hasSelectedKeyframes) {
             // KEYFRAME MODE: Move selected keyframes to layer's in point
             var result = moveSelectedKeysToLayerInPoint(selectedLayers, comp);
@@ -19434,31 +19453,50 @@ function handleTrimInPoint() {
  * If keyframes selected: Move selected keyframes so last keyframe lands on layer's out point
  * If no keyframes selected: Trim each layer's out point to its last keyframe
  */
-function handleTrimOutPoint() {
+function handleTrimOutPoint(setToMax) {
     try {
         DEBUG_JSX.clear();
-        DEBUG_JSX.log("handleTrimOutPoint called");
+        DEBUG_JSX.log("handleTrimOutPoint called" + (setToMax ? " [SHIFT - Max Out-Point]" : ""));
         app.beginUndoGroup("Trim Out Point");
-        
+
         var comp = app.project.activeItem;
         if (!comp || !(comp instanceof CompItem)) {
             app.endUndoGroup();
             return "error|No active composition";
         }
-        
+
         var selectedLayers = [];
         for (var i = 0; i < comp.selectedLayers.length; i++) {
             selectedLayers.push(comp.selectedLayers[i]);
         }
-        
+
         if (selectedLayers.length === 0) {
             app.endUndoGroup();
             return "error|No layers selected";
         }
-        
+
+        // Shift mode: Extend all selected layers' out-point to comp duration (comp end), keeping in-point fixed
+        if (setToMax) {
+            var layersAdjusted = 0;
+            for (var i = 0; i < selectedLayers.length; i++) {
+                try {
+                    var layer = selectedLayers[i];
+                    var originalInPoint = layer.inPoint;
+                    layer.outPoint = comp.duration;
+                    layer.inPoint = originalInPoint; // Restore in-point to keep it pinned
+                    layersAdjusted++;
+                } catch(e) {
+                    // Some layers (like precomps with shorter duration) may not extend that far
+                    $.writeln("Could not set max out-point for layer: " + selectedLayers[i].name + " - " + e.toString());
+                }
+            }
+            app.endUndoGroup();
+            return "success|Extended " + layersAdjusted + " layer(s) out-point to comp end";
+        }
+
         // Check if there are selected keyframes
         var hasSelectedKeyframes = checkForSelectedKeyframes(selectedLayers);
-        
+
         if (hasSelectedKeyframes) {
             // KEYFRAME MODE: Move selected keyframes to layer's out point
             var result = moveSelectedKeysToLayerOutPoint(selectedLayers, comp);
