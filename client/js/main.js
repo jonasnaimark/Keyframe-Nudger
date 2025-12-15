@@ -493,11 +493,11 @@ document.addEventListener('DOMContentLoaded', function() {
     // Setup tooltips - top row buttons show tooltips below to avoid cropping
     if (readKeyframesButton) createTooltip(readKeyframesButton, 'Read keyframes', 'below');
     if (staggerActionBtn) createTooltip(staggerActionBtn, 'Stagger direction', 'below');
-    if (snapToPlayheadBtn) createTooltip(snapToPlayheadBtn, 'Snap to playhead\nShift: Collapse delays', 'below');
+    if (snapToPlayheadBtn) createTooltip(snapToPlayheadBtn, 'Snap to playhead\nShift: Remove delays', 'below');
     if (mirrorKeysBtn) createTooltip(mirrorKeysBtn, 'Mirror keys', 'below');
     if (globalFrameInputField) createTooltip(globalFrameInputField, 'Frames', 'below');
-    if (delayDecrementBtn) createTooltip(delayDecrementBtn, 'Alt: 10x multiplier');
-    if (delayIncrementBtn) createTooltip(delayIncrementBtn, 'Alt: 10x multiplier');
+    if (delayDecrementBtn) createTooltip(delayDecrementBtn, 'Shift: Ignore precomps');
+    if (delayIncrementBtn) createTooltip(delayIncrementBtn, 'Shift: Ignore precomps');
 
     // Second row button tooltips - also show below
     var trimInBtn = document.getElementById('trimInBtn');

@@ -206,30 +206,45 @@ body {
 .frame-slider-handle {
     position: absolute;
     top: 50%;
-    width: 12px;
-    height: 12px;
+    width: 7px;
+    height: 7px;
     background-color: transparent;
     border: 2px solid #909090;
     border-radius: 50%;
     transform: translate(-50%, -50%);
     cursor: grab;
-    transition: all 0.15s ease;
+    transition: all 0.2s ease;
     box-sizing: border-box;
     z-index: 10;
+    opacity: 0.5;
 }
 
 .frame-slider-handle:hover {
-    background-color: #909090;
+    width: 12px;
+    height: 12px;
     border-color: #b0b0b0;
-    transform: translate(-50%, -50%) scale(1.1);
+    opacity: 1;
+    transform: translate(-50%, -50%);
+}
+
+/* Grow handle when hovering the slider container or parent row */
+.frame-slider-container:hover .frame-slider-handle,
+#frameMultiplierDisplay:hover .frame-slider-handle {
+    width: 12px;
+    height: 12px;
+    border-color: #b0b0b0;
+    opacity: 1;
+    transform: translate(-50%, -50%);
 }
 
 .frame-slider-handle:active,
 .frame-slider-handle.dragging {
+    width: 12px;
+    height: 12px;
     cursor: grabbing;
-    background-color: #b0b0b0;
     border-color: #c8c8c8;
-    transform: translate(-50%, -50%) scale(1.15);
+    opacity: 1;
+    transform: translate(-50%, -50%);
 }
 
 .control-row:last-child {
