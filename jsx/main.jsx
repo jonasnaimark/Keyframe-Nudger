@@ -27,6 +27,97 @@ var DEBUG_JSX = {
     }
 };
 
+/**
+ * Extend a precomp to a target duration when a precomp layer's outPoint exceeds the precomp's duration
+ * Recursively extends parent comps up the chain
+ */
+function extendPrecompFromLayerToTarget(precompLayer, precomp, targetDuration) {
+    var newDuration = targetDuration;
+    var oldDuration = precomp.duration;
+
+    if (newDuration <= oldDuration + 0.001) {
+        return; // No extension needed
+    }
+
+    // Extend the precomp's duration
+    precomp.duration = newDuration;
+    DEBUG_JSX.log("  COMP EXTEND: '" + precomp.name + "' " + (oldDuration * 1000).toFixed(1) + "ms → " + (newDuration * 1000).toFixed(1) + "ms");
+
+    // Extend layers in the precomp that were at or beyond old duration
+    var layersExtended = 0;
+    var layersSkipped = 0;
+    for (var i = 1; i <= precomp.numLayers; i++) {
+        var layerInPrecomp = precomp.layer(i);
+        var layerEnd = layerInPrecomp.startTime + layerInPrecomp.outPoint;
+
+        DEBUG_JSX.log("    Precomp layer " + i + ": '" + layerInPrecomp.name + "' end=" + (layerEnd * 1000).toFixed(1) + "ms");
+
+        if (layerEnd >= oldDuration - 0.001) {
+            // Check for Time Remap - skip layers with Time Remap enabled
+            var hasTimeRemap = layerInPrecomp.timeRemapEnabled && layerInPrecomp.timeRemap && layerInPrecomp.timeRemap.numKeys > 0;
+            DEBUG_JSX.log("      At old duration, timeRemapEnabled=" + (layerInPrecomp.timeRemapEnabled ? "TRUE" : "FALSE") + ", numKeys=" + (layerInPrecomp.timeRemap ? layerInPrecomp.timeRemap.numKeys : "N/A") + ", hasTimeRemap=" + (hasTimeRemap ? "TRUE" : "FALSE"));
+
+            if (hasTimeRemap) {
+                DEBUG_JSX.log("      SKIP: Has Time Remap, not extending");
+                layersSkipped++;
+            } else {
+                var newOutPoint = newDuration - layerInPrecomp.startTime;
+                if (newOutPoint > 0) {
+                    layerInPrecomp.outPoint = newOutPoint;
+                    layersExtended++;
+                    DEBUG_JSX.log("      EXTENDED to " + (newOutPoint * 1000).toFixed(1) + "ms");
+                }
+            }
+        } else {
+            DEBUG_JSX.log("      Not at old duration, leaving unchanged");
+        }
+    }
+
+    if (layersExtended > 0) {
+        DEBUG_JSX.log("  COMP EXTEND: Extended " + layersExtended + " layer(s) in '" + precomp.name + "'" + (layersSkipped > 0 ? " (skipped " + layersSkipped + " Time Remap layers)" : ""));
+    }
+
+    // Find parent comps that use this precomp and extend them
+    for (var c = 1; c <= app.project.numItems; c++) {
+        var item = app.project.item(c);
+        if (item instanceof CompItem && item !== precomp) {
+            for (var i = 1; i <= item.numLayers; i++) {
+                var parentLayer = item.layer(i);
+                if (parentLayer.source === precomp) {
+                    // Update parent layer's outPoint to match new precomp duration
+                    var parentLayerEnd = parentLayer.startTime + parentLayer.outPoint;
+                    if (parentLayer.outPoint < precomp.duration) {
+                        parentLayer.outPoint = precomp.duration;
+                        DEBUG_JSX.log("  COMP EXTEND: Updated parent layer '" + parentLayer.name + "' outPoint in '" + item.name + "'");
+
+                        // Check if parent layer is also a precomp layer and recurse
+                        if (parentLayer.outPoint > item.duration + 0.001) {
+                            // Parent comp needs extension too - find if parent comp is used as precomp
+                            var isParentUsedAsPrecomp = false;
+                            for (var pc = 1; pc <= app.project.numItems; pc++) {
+                                var parentParentItem = app.project.item(pc);
+                                if (parentParentItem instanceof CompItem && parentParentItem !== item) {
+                                    for (var ppi = 1; ppi <= parentParentItem.numLayers; ppi++) {
+                                        if (parentParentItem.layer(ppi).source === item) {
+                                            isParentUsedAsPrecomp = true;
+                                            break;
+                                        }
+                                    }
+                                    if (isParentUsedAsPrecomp) break;
+                                }
+                            }
+
+                            if (isParentUsedAsPrecomp) {
+                                extendPrecompFromLayerToTarget(parentLayer, item, precomp.duration);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
 function getPropertySortKey(prop) {
     var indices = [];
     try {
@@ -483,8 +574,259 @@ function updateLayerInOutPoints(layerData, keyframeDataArray) {
 
         // Update layer points if they were tracked
         if (data.trackInPoint && newEarliestTime !== null) {
-            DEBUG_JSX.log("IN/OUT UPDATE: Setting layer '" + layer.name + "' inPoint from " + layer.inPoint + " to " + newEarliestTime);
-            layer.inPoint = newEarliestTime;
+            var timeOffset = newEarliestTime - data.originalInPoint;
+
+            DEBUG_JSX.log("IN/OUT UPDATE: timeOffset calculation:");
+            DEBUG_JSX.log("  newEarliestTime: " + newEarliestTime);
+            DEBUG_JSX.log("  data.originalInPoint: " + data.originalInPoint);
+            DEBUG_JSX.log("  timeOffset: " + timeOffset);
+            DEBUG_JSX.log("  Math.abs(timeOffset): " + Math.abs(timeOffset));
+            DEBUG_JSX.log("  Will use strategy: " + (Math.abs(timeOffset) > 0.001));
+
+            // Only apply in-point delay strategy if there's a meaningful time change
+            if (Math.abs(timeOffset) > 0.001) {
+                DEBUG_JSX.log("═══════════════════════════════════════════════");
+                DEBUG_JSX.log("IN-POINT DELAY STRATEGY: Layer '" + layer.name + "'");
+                DEBUG_JSX.log("  Time offset: " + (timeOffset * 1000).toFixed(1) + "ms");
+                DEBUG_JSX.log("  Original inPoint: " + data.originalInPoint);
+                DEBUG_JSX.log("  New earliest time: " + newEarliestTime);
+                DEBUG_JSX.log("═══════════════════════════════════════════════");
+
+                // Step 1: Shift the entire layer forward/backward by the nudge amount
+                var originalStartTime = layer.startTime;
+                layer.startTime += timeOffset;
+                DEBUG_JSX.log("✓ Shifted layer.startTime: " + originalStartTime + " → " + layer.startTime + " (+" + (timeOffset * 1000).toFixed(1) + "ms)");
+
+                // Step 2: Compensate out-point so it stays at same absolute timeline position
+                var originalOutPoint = layer.outPoint;
+                layer.outPoint -= timeOffset;
+                DEBUG_JSX.log("✓ Compensated layer.outPoint: " + originalOutPoint + " → " + layer.outPoint + " (-" + (timeOffset * 1000).toFixed(1) + "ms)");
+
+                // Step 3: Move UNSELECTED keyframes back by timeOffset in layer time
+                // Selected keyframes stay at their original layer times (they move with the layer)
+                // Unselected keyframes are compensated back (they stay at same absolute comp time)
+                DEBUG_JSX.log("───────────────────────────────────────────────");
+                DEBUG_JSX.log("Compensating UNSELECTED keyframes by " + (-timeOffset * 1000).toFixed(1) + "ms in layer time:");
+
+                var keyframesCompensated = 0;
+
+                // Helper function to process all properties in a group
+                function compensateKeyframesInGroup(propGroup, depth) {
+                    depth = depth || 0;
+                    if (depth > 10) return; // Prevent infinite recursion
+
+                    for (var p = 1; p <= propGroup.numProperties; p++) {
+                        try {
+                            var prop = propGroup.property(p);
+                            if (!prop) continue;
+
+                            if (prop.propertyType === PropertyType.PROPERTY) {
+                                if (prop.canVaryOverTime && prop.numKeys > 0) {
+                                    // STEP 1: Capture ALL keyframe states first
+                                    var keyframeStates = [];
+                                    for (var k = 1; k <= prop.numKeys; k++) {
+                                        var keyTime = prop.keyTime(k);
+                                        var isSelected = prop.keySelected(k);
+
+                                        // CRITICAL: Only compensate UNSELECTED keyframes
+                                        // Selected keyframes stay at original layer time (they move WITH the layer)
+                                        var newTime = isSelected ? keyTime : (keyTime - timeOffset);
+
+                                        if (newTime >= 0) {
+                                            var state = captureKeyframeState(prop, k);
+                                            if (state) {
+                                                keyframeStates.push({
+                                                    oldTime: keyTime,
+                                                    newTime: newTime,
+                                                    isSelected: isSelected,
+                                                    state: state
+                                                });
+                                            }
+                                        } else {
+                                            DEBUG_JSX.log("  ⚠ Skipping " + prop.name + " key at " + (keyTime * 1000).toFixed(1) + "ms - would become negative");
+                                        }
+                                    }
+
+                                    // STEP 2: Remove ALL keyframes (in reverse order)
+                                    for (var k = prop.numKeys; k >= 1; k--) {
+                                        prop.removeKey(k);
+                                    }
+
+                                    // STEP 3: Add ALL keyframes back at new times
+                                    var keysToReselect = [];
+                                    for (var k = 0; k < keyframeStates.length; k++) {
+                                        var kfData = keyframeStates[k];
+                                        var newIndex = prop.addKey(kfData.newTime);
+                                        restoreKeyframeState(prop, newIndex, kfData.state);
+                                        keyframesCompensated++;
+
+                                        // Track which keys need to be re-selected
+                                        if (kfData.isSelected) {
+                                            keysToReselect.push(newIndex);
+                                        }
+
+                                        DEBUG_JSX.log("  " + prop.name + " (" + (kfData.isSelected ? "SELECTED" : "unselected") + "): " +
+                                            (kfData.oldTime * 1000).toFixed(1) + "ms → " + (kfData.newTime * 1000).toFixed(1) + "ms");
+                                    }
+
+                                    // STEP 4: Restore selection (following AirBoard pattern)
+                                    if (keysToReselect.length > 0) {
+                                        // First deselect ALL keyframes (critical step!)
+                                        for (var d = 1; d <= prop.numKeys; d++) {
+                                            try {
+                                                prop.setSelectedAtKey(d, false);
+                                            } catch (e) {}
+                                        }
+
+                                        // Then select our target keyframes
+                                        for (var s = 0; s < keysToReselect.length; s++) {
+                                            try {
+                                                prop.setSelectedAtKey(keysToReselect[s], true);
+                                            } catch (selErr) {
+                                                // Selection restore might fail in some cases
+                                            }
+                                        }
+                                    }
+                                }
+                            } else if (prop.propertyType === PropertyType.INDEXED_GROUP ||
+                                       prop.propertyType === PropertyType.NAMED_GROUP) {
+                                compensateKeyframesInGroup(prop, depth + 1);
+                            }
+                        } catch (propError) {
+                            DEBUG_JSX.log("  ⚠ Error processing property: " + propError.toString());
+                        }
+                    }
+                }
+
+                // Process all property groups
+                try {
+                    if (layer.transform) compensateKeyframesInGroup(layer.transform);
+                    if (layer.effect && layer.effect.numProperties > 0) compensateKeyframesInGroup(layer.effect);
+                    if (layer.mask && layer.mask.numProperties > 0) compensateKeyframesInGroup(layer.mask);
+                    if (layer.text && layer.text.numProperties > 0) compensateKeyframesInGroup(layer.text);
+                    if (layer.materialOption) compensateKeyframesInGroup(layer.materialOption);
+                    if (layer.audio) compensateKeyframesInGroup(layer.audio);
+                } catch (e) {
+                    DEBUG_JSX.log("⚠ Error compensating keyframes: " + e.toString());
+                }
+
+                // Handle Time Remap
+                if (layer.timeRemapEnabled && layer.timeRemap && layer.timeRemap.numKeys > 0) {
+                    // STEP 1: Capture ALL Time Remap keyframe states
+                    var timeRemapStates = [];
+                    for (var k = 1; k <= layer.timeRemap.numKeys; k++) {
+                        var keyTime = layer.timeRemap.keyTime(k);
+                        var isSelected = layer.timeRemap.keySelected(k);
+
+                        // CRITICAL: Only compensate UNSELECTED keyframes
+                        var newTime = isSelected ? keyTime : (keyTime - timeOffset);
+
+                        if (newTime >= 0) {
+                            var state = captureKeyframeState(layer.timeRemap, k);
+                            if (state) {
+                                timeRemapStates.push({
+                                    oldTime: keyTime,
+                                    newTime: newTime,
+                                    isSelected: isSelected,
+                                    state: state
+                                });
+                            }
+                        }
+                    }
+
+                    // STEP 2: Remove ALL Time Remap keyframes
+                    for (var k = layer.timeRemap.numKeys; k >= 1; k--) {
+                        layer.timeRemap.removeKey(k);
+                    }
+
+                    // STEP 3: Add ALL Time Remap keyframes back at new times
+                    var timeRemapToReselect = [];
+                    for (var k = 0; k < timeRemapStates.length; k++) {
+                        var kfData = timeRemapStates[k];
+                        var newIndex = layer.timeRemap.addKey(kfData.newTime);
+                        restoreKeyframeState(layer.timeRemap, newIndex, kfData.state);
+                        keyframesCompensated++;
+
+                        if (kfData.isSelected) {
+                            timeRemapToReselect.push(newIndex);
+                        }
+
+                        DEBUG_JSX.log("  Time Remap (" + (kfData.isSelected ? "SELECTED" : "unselected") + "): " +
+                            (kfData.oldTime * 1000).toFixed(1) + "ms → " + (kfData.newTime * 1000).toFixed(1) + "ms");
+                    }
+
+                    // STEP 4: Restore Time Remap selection (following AirBoard pattern)
+                    if (timeRemapToReselect.length > 0) {
+                        // First deselect ALL Time Remap keyframes
+                        for (var d = 1; d <= layer.timeRemap.numKeys; d++) {
+                            try {
+                                layer.timeRemap.setSelectedAtKey(d, false);
+                            } catch (e) {}
+                        }
+
+                        // Then select our target keyframes
+                        for (var s = 0; s < timeRemapToReselect.length; s++) {
+                            try {
+                                layer.timeRemap.setSelectedAtKey(timeRemapToReselect[s], true);
+                            } catch (selErr) {}
+                        }
+                    }
+                }
+
+                DEBUG_JSX.log("✓ Compensated " + keyframesCompensated + " keyframes");
+
+                // Step 4: Move all layer markers back by timeOffset to keep them at same absolute position
+                DEBUG_JSX.log("───────────────────────────────────────────────");
+                DEBUG_JSX.log("Compensating layer markers:");
+
+                var markersCompensated = 0;
+                if (layer.marker && layer.marker.numKeys > 0) {
+                    // Collect all markers first (to avoid index issues during removal)
+                    var markersToMove = [];
+                    for (var m = 1; m <= layer.marker.numKeys; m++) {
+                        var markerTime = layer.marker.keyTime(m);
+                        var markerValue = layer.marker.keyValue(m);
+                        var newMarkerTime = markerTime - timeOffset;
+
+                        if (newMarkerTime >= 0) {
+                            markersToMove.push({
+                                index: m,
+                                oldTime: markerTime,
+                                newTime: newMarkerTime,
+                                value: markerValue
+                            });
+                        } else {
+                            DEBUG_JSX.log("  ⚠ Skipping marker " + m + " - would become negative (" + newMarkerTime + "s)");
+                        }
+                    }
+
+                    // Move markers in reverse order to preserve indices
+                    for (var m = markersToMove.length - 1; m >= 0; m--) {
+                        var markerData = markersToMove[m];
+                        try {
+                            layer.marker.removeKey(markerData.index);
+                            var newMarkerIndex = layer.marker.addKey(markerData.newTime);
+                            layer.marker.setValueAtKey(newMarkerIndex, markerData.value);
+                            markersCompensated++;
+
+                            var comment = markerData.value.comment || "";
+                            DEBUG_JSX.log("  Marker " + markerData.index + " '" + comment + "': " +
+                                (markerData.oldTime * 1000).toFixed(1) + "ms → " + (markerData.newTime * 1000).toFixed(1) + "ms");
+                        } catch (e) {
+                            DEBUG_JSX.log("  ⚠ Error moving marker " + markerData.index + ": " + e.toString());
+                        }
+                    }
+                }
+
+                DEBUG_JSX.log("✓ Compensated " + markersCompensated + " markers");
+                DEBUG_JSX.log("═══════════════════════════════════════════════");
+                DEBUG_JSX.log("IN-POINT DELAY STRATEGY COMPLETE");
+                DEBUG_JSX.log("═══════════════════════════════════════════════");
+            } else {
+                // No significant time change, just trim the in-point normally
+                DEBUG_JSX.log("IN/OUT UPDATE: Setting layer '" + layer.name + "' inPoint from " + layer.inPoint + " to " + newEarliestTime);
+                layer.inPoint = newEarliestTime;
+            }
         }
         if (data.trackOutPoint && newLatestTime !== null) {
             DEBUG_JSX.log("IN/OUT UPDATE: Setting layer '" + layer.name + "' outPoint from " + layer.outPoint + " to " + newLatestTime);
@@ -5596,29 +5938,25 @@ function nudgeDelay(direction) {
                             }
                         }
                         
-                        // Move layer markers in separate undo group
+                        // Move layer markers (no separate undo group - let parent nudge operation handle undo)
                         if (markersToMove.length > 0) {
-                            app.beginUndoGroup("Sync Layer Markers");
-                            
                             markersToMove.sort(function(a, b) { return b.markerIndex - a.markerIndex; });
-                            
+
                             for (var m = 0; m < markersToMove.length; m++) {
                                 var markerInfo = markersToMove[m];
-                                
+
                                 try {
                                     markerInfo.layer.marker.removeKey(markerInfo.markerIndex);
                                     var newMarkerIndex = markerInfo.layer.marker.addKey(markerInfo.newTime);
                                     markerInfo.layer.marker.setValueAtKey(newMarkerIndex, markerInfo.markerValue);
-                                    
+
                                     DEBUG_JSX.log("Moved layer marker '" + markerInfo.comment + "' from " + Math.round(markerInfo.oldTime * 1000) + "ms to " + Math.round(markerInfo.newTime * 1000) + "ms");
                                     debugInfo.push("Synced layer marker '" + markerInfo.comment + "'");
-                                    
+
                                 } catch(markerMoveError) {
                                     DEBUG_JSX.log("Failed to move layer marker: " + markerMoveError.toString());
                                 }
                             }
-                            
-                            app.endUndoGroup();
                         }
                         
                     } catch(markerSyncError) {
@@ -19416,16 +19754,26 @@ function handleTrimInPoint(setToMin) {
                 try {
                     var layer = selectedLayers[i];
                     var originalOutPoint = layer.outPoint;
+                    var originalInPoint = layer.inPoint;
+
+                    DEBUG_JSX.log("--- Layer " + (i+1) + ": '" + layer.name + "' ---");
+                    DEBUG_JSX.log("  originalInPoint=" + (originalInPoint * 1000).toFixed(1) + "ms");
+
                     layer.inPoint = 0;
                     layer.outPoint = originalOutPoint; // Restore out-point to keep it pinned
+
+                    DEBUG_JSX.log("  newInPoint=" + (layer.inPoint * 1000).toFixed(1) + "ms");
+
                     layersAdjusted++;
                 } catch(e) {
                     // Some layers (like locked precomps) may not be adjustable
+                    DEBUG_JSX.log("Could not set min in-point for layer: " + selectedLayers[i].name + " - " + e.toString());
                     $.writeln("Could not set min in-point for layer: " + selectedLayers[i].name + " - " + e.toString());
                 }
             }
             app.endUndoGroup();
-            return "success|Extended " + layersAdjusted + " layer(s) in-point to comp start";
+            var debugMessages = DEBUG_JSX.getMessages();
+            return "success|Extended " + layersAdjusted + " layer(s) in-point to comp start|" + debugMessages.join("|");
         }
 
         // Check if there are selected keyframes
@@ -19482,16 +19830,44 @@ function handleTrimOutPoint(setToMax) {
                 try {
                     var layer = selectedLayers[i];
                     var originalInPoint = layer.inPoint;
+                    var originalOutPoint = layer.outPoint;
+
+                    DEBUG_JSX.log("--- Layer " + (i+1) + ": '" + layer.name + "' ---");
+                    DEBUG_JSX.log("  originalOutPoint=" + (originalOutPoint * 1000).toFixed(1) + "ms");
+
+                    // Check for Time Remap on the layer itself
+                    var hasTimeRemap = layer.timeRemapEnabled && layer.timeRemap && layer.timeRemap.numKeys > 0;
+                    DEBUG_JSX.log("  hasTimeRemap=" + (hasTimeRemap ? "TRUE" : "FALSE"));
+
                     layer.outPoint = comp.duration;
                     layer.inPoint = originalInPoint; // Restore in-point to keep it pinned
+
+                    DEBUG_JSX.log("  newOutPoint=" + (layer.outPoint * 1000).toFixed(1) + "ms");
+
+                    // If layer is a precomp and extended beyond its duration, extend the precomp
+                    if (layer.source && layer.source instanceof CompItem) {
+                        var precomp = layer.source;
+                        var layerAbsoluteEnd = layer.startTime + layer.outPoint;
+
+                        DEBUG_JSX.log("  Layer is precomp: '" + precomp.name + "', duration=" + (precomp.duration * 1000).toFixed(1) + "ms");
+                        DEBUG_JSX.log("  Layer absolute end=" + (layerAbsoluteEnd * 1000).toFixed(1) + "ms, layer.outPoint=" + (layer.outPoint * 1000).toFixed(1) + "ms");
+
+                        if (layer.outPoint > precomp.duration + 0.001) {
+                            DEBUG_JSX.log("  EXTENDING PRECOMP: outPoint exceeds precomp duration");
+                            extendPrecompFromLayerToTarget(layer, precomp, layer.outPoint);
+                        }
+                    }
+
                     layersAdjusted++;
                 } catch(e) {
                     // Some layers (like precomps with shorter duration) may not extend that far
+                    DEBUG_JSX.log("Could not set max out-point for layer: " + selectedLayers[i].name + " - " + e.toString());
                     $.writeln("Could not set max out-point for layer: " + selectedLayers[i].name + " - " + e.toString());
                 }
             }
             app.endUndoGroup();
-            return "success|Extended " + layersAdjusted + " layer(s) out-point to comp end";
+            var debugMessages = DEBUG_JSX.getMessages();
+            return "success|Extended " + layersAdjusted + " layer(s) out-point to comp end|" + debugMessages.join("|");
         }
 
         // Check if there are selected keyframes

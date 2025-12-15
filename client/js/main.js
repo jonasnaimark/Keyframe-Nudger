@@ -345,8 +345,8 @@ document.addEventListener('DOMContentLoaded', function() {
                 globalFrameInputField.value = value;
                 updateSliderPosition(value);
             });
-            // Add tooltip showing frame number
-            createTooltip(marker, value.toString());
+            // Add tooltip showing frame number (no delay)
+            createTooltip(marker, value.toString(), undefined, 0);
         });
 
         // Initialize slider position from input
@@ -418,7 +418,8 @@ document.addEventListener('DOMContentLoaded', function() {
     }
 
     // Global tooltip creation function
-    function createTooltip(element, text, position) {
+    function createTooltip(element, text, position, delay) {
+        if (delay === undefined) delay = 500;
         var tooltip = null;
         var showTimeout = null;
         var isShowing = false;
@@ -478,7 +479,7 @@ document.addEventListener('DOMContentLoaded', function() {
                 setTimeout(function() {
                     if (tooltip) tooltip.style.opacity = '1';
                 }, 10);
-            }, 500);
+            }, delay);
         });
 
         element.addEventListener('mouseleave', function() {
