@@ -369,9 +369,8 @@ document.addEventListener('DOMContentLoaded', function() {
             var position = (e.clientX - rect.left - padding) / (rect.width - padding * 2);
             position = Math.max(0, Math.min(1, position));
 
-            // Apply magnetic snapping
-            var snappedPosition = applyMagneticSnap(position);
-            var value = Math.round(positionToValue(snappedPosition));
+            // No magnetic snapping - use position directly
+            var value = Math.round(positionToValue(position));
 
             globalFrameInputField.value = value;
             updateSliderPosition(value);
@@ -391,8 +390,8 @@ document.addEventListener('DOMContentLoaded', function() {
             var position = (e.clientX - rect.left - padding) / (rect.width - padding * 2);
             position = Math.max(0, Math.min(1, position));
 
-            var snappedPosition = applyMagneticSnap(position);
-            var value = Math.round(positionToValue(snappedPosition));
+            // No magnetic snapping - use position directly
+            var value = Math.round(positionToValue(position));
 
             globalFrameInputField.value = value;
             updateSliderPosition(value);
@@ -494,11 +493,11 @@ document.addEventListener('DOMContentLoaded', function() {
     // Setup tooltips - top row buttons show tooltips below to avoid cropping
     if (readKeyframesButton) createTooltip(readKeyframesButton, 'Read keyframes', 'below');
     if (staggerActionBtn) createTooltip(staggerActionBtn, 'Stagger direction', 'below');
-    if (snapToPlayheadBtn) createTooltip(snapToPlayheadBtn, 'Snap to playhead\nShift: Keep delays', 'below');
+    if (snapToPlayheadBtn) createTooltip(snapToPlayheadBtn, 'Snap to playhead\nShift: Collapse delays', 'below');
     if (mirrorKeysBtn) createTooltip(mirrorKeysBtn, 'Mirror keys', 'below');
     if (globalFrameInputField) createTooltip(globalFrameInputField, 'Frames', 'below');
-    if (delayDecrementBtn) createTooltip(delayDecrementBtn, 'Shift: Ignore precomps');
-    if (delayIncrementBtn) createTooltip(delayIncrementBtn, 'Shift: Ignore precomps');
+    if (delayDecrementBtn) createTooltip(delayDecrementBtn, 'Alt: 10x multiplier');
+    if (delayIncrementBtn) createTooltip(delayIncrementBtn, 'Alt: 10x multiplier');
 
     // Second row button tooltips - also show below
     var trimInBtn = document.getElementById('trimInBtn');
@@ -815,31 +814,23 @@ document.addEventListener('DOMContentLoaded', function() {
     // Delay buttons
     if (delayIncrementBtn && delayDecrementBtn && globalFrameInputField) {
         delayIncrementBtn.addEventListener('click', function(event) {
-            var isShiftHeld = event.shiftKey;
             var isAltHeld = event.altKey;
             if (!csInterface) return;
             var delayFrames = parseFloat(globalFrameInputField.value) || 3;
             if (isAltHeld) delayFrames *= 10;
             delayIncrementBtn.disabled = true;
-            var script = isShiftHeld
-                ? 'nudgeDelayWithFrames(1, ' + delayFrames + ')'
-                : 'nudgeDelayTimelineMode(1, ' + delayFrames + ')';
-            csInterface.evalScript(script, function(result) {
+            csInterface.evalScript('nudgeDelayTimelineMode(1, ' + delayFrames + ')', function(result) {
                 handleDelayResult(result, delayIncrementBtn);
             });
         });
 
         delayDecrementBtn.addEventListener('click', function(event) {
-            var isShiftHeld = event.shiftKey;
             var isAltHeld = event.altKey;
             if (!csInterface) return;
             var delayFrames = parseFloat(globalFrameInputField.value) || 3;
             if (isAltHeld) delayFrames *= 10;
             delayDecrementBtn.disabled = true;
-            var script = isShiftHeld
-                ? 'nudgeDelayWithFrames(-1, ' + delayFrames + ')'
-                : 'nudgeDelayTimelineMode(-1, ' + delayFrames + ')';
-            csInterface.evalScript(script, function(result) {
+            csInterface.evalScript('nudgeDelayTimelineMode(-1, ' + delayFrames + ')', function(result) {
                 handleDelayResult(result, delayDecrementBtn);
             });
         });
@@ -898,8 +889,8 @@ document.addEventListener('DOMContentLoaded', function() {
     if (snapToPlayheadBtn) {
         snapToPlayheadBtn.addEventListener('click', function(event) {
             if (!csInterface) return;
-            var isShiftHeld = event.shiftKey;
-            csInterface.evalScript('snapToPlayheadFromPanel(' + isShiftHeld + ')', function(result) {
+            var preserveDelays = !event.shiftKey; // Default: keep delays, Shift: collapse
+            csInterface.evalScript('snapToPlayheadFromPanel(' + preserveDelays + ')', function(result) {
                 console.log('Snap to playhead result:', result);
             });
         });

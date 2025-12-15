@@ -219,6 +219,7 @@ body {
 }
 
 .frame-slider-handle:hover {
+    background-color: #909090;
     border-color: #b0b0b0;
     transform: translate(-50%, -50%) scale(1.1);
 }
@@ -226,6 +227,7 @@ body {
 .frame-slider-handle:active,
 .frame-slider-handle.dragging {
     cursor: grabbing;
+    background-color: #b0b0b0;
     border-color: #c8c8c8;
     transform: translate(-50%, -50%) scale(1.15);
 }
